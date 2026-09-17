@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     monitor_parser.add_argument("--root", default="/sys/fs/cgroup")
     monitor_parser.add_argument("--proc", default="/proc")
-    monitor_parser.add_argument("--attrib", nargs="?", const="-", default=None)
+    monitor_parser.add_argument("--attrib", choices=["-"], nargs="?", const="-", default=None)
     monitor_parser.add_argument("--retention-hours", type=float, default=48.0)
     monitor_parser.add_argument("--duration", type=float, default=None)
 
@@ -52,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.subcommand == "monitor":
+            attrib_stream = sys.stdin if args.attrib == "-" else None
             run(
                 db_path=args.db,
                 root=args.root,
@@ -60,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
                 retention_hours=args.retention_hours,
                 duration=args.duration,
                 tck=tck,
+                attrib_stream=attrib_stream,
             )
             return 0
         elif args.subcommand == "bench":

@@ -10,6 +10,7 @@ Nothing is marked done without a runnable check.
 - [Phase D — documentation and containment](#phase-d--documentation-and-containment)
 - [Phase 0 — scaffold](#phase-0--scaffold)
 - [Phase 1 — monitor](#phase-1--monitor)
+- [Phase 2 — softirq attribution](#phase-2--softirq-attribution)
 
 ## Operating rules
 
@@ -33,7 +34,8 @@ Nothing is marked done without a runnable check.
 | D — documentation and containment | **Done** — containment verified (D.5–D.7) |
 | 0 — scaffold | **Done** |
 | 1 — monitor | **Done** — overhead 0.68% of one core (R10) |
-| 2 — attribution | 2a (userspace) dispatched; 2b (BPF) waits for the toolchain install |
+| 2 — attribution | 2a (userspace) **done**; 2b (BPF) waits for the toolchain install; gate after 2b |
+| 3 — datasets | Dispatched |
 | 2–13 | Not started |
 
 ---
@@ -143,6 +145,14 @@ The jail probe moved to `.tasks/test_jail_probe.py` and runs at every gate.
 
 **Standing rule:** never start agy with the repository as its working directory.
 
+### D.8 Pre-existing global rules removed
+
+At the user's request (2026-09-17), `command(claude)` and `command(cp)` were removed from
+`~/.gemini/antigravity-cli/settings.json`. Both predated these projects; `claude` could start an agent with the user's
+full permissions outside the jail. Remaining command rule: `command(/home/shreenipane/.local/bin/irm-test)`. The previous
+project's `read_file`/`write_file` rules for ai-memory-reflection are untouched. Verification probe: `claude --version`
+from agy (result recorded below when it returns).
+
 ---
 
 ## Phase 0 — scaffold
@@ -184,5 +194,22 @@ architect), benchmark **0.68% of one core** (0.043% of the host), 135 leaves. R1
 host); host 0.68–0.73 cores and 6.2 GiB used, consistent with `top` (~3% busy of 16 CPUs) and `free`; first host row has
 NULL rates as specified; busiest leaves are the terminal and Firefox scopes; `io_rbps` NULL for 97 leaves where the io
 controller is not enabled (expected).
+
+**Accepted.**
+
+---
+
+## Phase 2 — softirq attribution
+
+### 2a Userspace (`.tasks/02a-attrib-python.md`)
+Dispatch: `denied_actions` none; changed `irm/attrib.py` (186 lines), `irm/monitor.py` (+29), `irm/cli.py` (+3),
+`tests/test_attrib.py`. Agent `23 passed`; architect `23 passed`.
+
+Review of `attribute()`: per-CPU proportional split by packet deltas matches TRD §5.4; CPUs with NET_RX time but no packets
+go to `unattrib`; any decreasing counter or vanished cgroup id returns `None` (loader restart; BPF hash entries are never
+deleted, so a vanished id can only mean a restart); `Reader` re-baselines after a `None`. The structural length checks
+are verbose (~40 lines) but validate stdin input, so they stay. Known costs, accepted: with attribution on, each sweep
+walks the cgroup tree twice (`discover` + `cgroup_ids`); a dead loader shows up only as NULL attribution columns after
+3 × interval. The mutation checks run at the phase gate after 2b.
 
 **Accepted.**

@@ -1,0 +1,8 @@
+{
+  "interval": 5.0,
+  "seconds": 60.0,
+  "cgroups": 135.0,
+  "cpu_seconds": 0.41059533700000006,
+  "pct_of_one_core": 0.6842900988442726,
+  "pct_of_host": 0.04276813117776704
+}

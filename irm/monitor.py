@@ -5,6 +5,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import time
+from irm.attrib import Reader, cgroup_ids
 
 COLUMNS: tuple[str, ...] = (
     "cpu_cores", "throttled_ratio", "mem_bytes", "io_rbps", "io_wbps", "cpu_psi", "mem_psi",
@@ -172,6 +173,7 @@ def host_gauges(prev: dict | None, cur: dict, dt: float | None, tck: float) -> d
 def sweep(
     root: str | Path, proc: str | Path, state: dict | None,
     now_wall: float, now_mono: float, tck: float | None = None,
+    attrib: dict | None = None,
 ) -> tuple[list[dict], dict]:
     if tck is None:
         try:
@@ -184,15 +186,33 @@ def sweep(
     prev_host = state.get("host") if state else None
     dt = (now_mono - prev_mono) if (prev_mono is not None) else None
 
+    if attrib is not None:
+        name_to_id = {name: ino for ino, name in cgroup_ids(root).items()}
+        attrib_cores = attrib.get("attrib_cores", {})
+        blamed_cores = attrib.get("blamed_cores", {})
+        unattrib_cores = attrib.get("unattrib_cores")
+        root_ino = name_to_id.get("/")
+    else:
+        name_to_id = attrib_cores = blamed_cores = unattrib_cores = root_ino = None
+
     rows, new_leaf, ts = [], {}, int(now_wall)
     for name in discover(root):
         raw = read_cgroup(root, name)
         if raw is not None:
-            rows.append({"ts": ts, "cgroup": name, **leaf_gauges(prev_leaf.get(name), raw, dt)})
+            gauges = leaf_gauges(prev_leaf.get(name), raw, dt)
+            if attrib is not None:
+                ino = name_to_id.get(name)
+                gauges["netrx_attrib_cores"] = attrib_cores.get(ino, 0.0) if ino is not None else 0.0
+                gauges["netrx_blamed_cores"] = blamed_cores.get(ino, 0.0) if ino is not None else 0.0
+            rows.append({"ts": ts, "cgroup": name, **gauges})
             new_leaf[name] = raw
 
     raw_host = read_host(proc)
-    rows.append({"ts": ts, "cgroup": "host", **host_gauges(prev_host, raw_host, dt, tck)})
+    h_gauges = host_gauges(prev_host, raw_host, dt, tck)
+    if attrib is not None:
+        h_gauges["netrx_blamed_cores"] = blamed_cores.get(root_ino, 0.0) if root_ino is not None else 0.0
+        h_gauges["netrx_unattrib_cores"] = unattrib_cores
+    rows.append({"ts": ts, "cgroup": "host", **h_gauges})
     return rows, {"mono": now_mono, "leaf": new_leaf, "host": raw_host}
 
 
@@ -223,7 +243,9 @@ def run(
     db_path: str | Path, root: str | Path, proc: str | Path,
     interval: float, retention_hours: float,
     duration: float | None = None, tck: float | None = None, on_sweep=None,
+    attrib_stream=None,
 ) -> int:
+    reader = Reader(attrib_stream) if attrib_stream is not None else None
     conn = open_db(db_path)
     try:
         now_mono = time.monotonic()
@@ -239,7 +261,8 @@ def run(
                 prune(conn, now_wall, retention_hours)
                 last_prune = now_mono
 
-            rows, state = sweep(root, proc, state, now_wall, now_mono, tck=tck)
+            attrib = reader.latest(3 * interval) if reader is not None else None
+            rows, state = sweep(root, proc, state, now_wall, now_mono, tck=tck, attrib=attrib)
             write_rows(conn, rows)
             sweeps += 1
             if on_sweep is not None:

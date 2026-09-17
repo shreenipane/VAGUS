@@ -53,6 +53,6 @@ git status --porcelain                                       # only files the sp
 
 ## 4. Open items
 
-- **User decision pending:** the global agy rules `command(claude)` and `command(cp)` predate these projects.
-  `claude` can start an agent with the user's full permissions outside any jail, which bypasses T2. Recommendation:
-  remove both.
+- None. **Closed 2026-09-17:** the global agy rules `command(claude)` and `command(cp)`, which predated these projects
+  (`claude` could start an agent with the user's full permissions outside any jail, bypassing T2), were removed at the
+  user's request. The only command rule is now the `irm-test` launcher (BUILD_LOG D.8).
