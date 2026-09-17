@@ -301,3 +301,39 @@ def test_transitions_callback():
     # Last transition: done is True
     assert recorded[1][4] is True
 
+
+def test_synthetic_cluster_util_scale():
+    """util_scale=1.0 reproduces the default output exactly; util_scale=2.0 never exceeds 100."""
+    d_def = synthetic_cluster(40, 100, seed=42)
+    d_one = synthetic_cluster(40, 100, seed=42, util_scale=1.0)
+    np.testing.assert_array_equal(d_def["cpu_max"], d_one["cpu_max"])
+    np.testing.assert_array_equal(d_def["cpu_avg"], d_one["cpu_avg"])
+
+    d_two = synthetic_cluster(40, 100, seed=42, util_scale=2.0)
+    valid_max = d_two["cpu_max"][np.isfinite(d_two["cpu_max"])]
+    valid_avg = d_two["cpu_avg"][np.isfinite(d_two["cpu_avg"])]
+    assert np.all(valid_max <= 100.0)
+    assert np.all(valid_max >= 0.0)
+    assert np.all(valid_avg <= 100.0)
+    assert np.all(valid_avg >= 0.0)
+    assert np.nanmean(d_two["cpu_max"]) > np.nanmean(d_def["cpu_max"])
+
+
+def test_simulator_use_k_false():
+    """use_k=False makes feature index 12 equal 0.5 for every candidate."""
+    data = synthetic_cluster(30, 200, seed=0)
+
+    k_features = []
+
+    class RecordKPolicy(Policy):
+        def choose(self, features: np.ndarray, host_ids: list[int]) -> int:
+            k_features.extend(features[:, 12].tolist())
+            return 0
+
+    sim = Simulator(data, 0, 100 * STEP, RecordKPolicy(), n_hosts=4, use_k=False)
+    metrics = sim.run()
+
+    assert len(k_features) > 0
+    assert all(k == 0.5 for k in k_features)
+
+

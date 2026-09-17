@@ -7,7 +7,10 @@ from irm.dqn import (
     QNet,
     compute_double_dqn_target,
     demo,
+    evaluate,
     masked_argmax,
+    study,
+    train_dqn,
 )
 import irm.dqn
 
@@ -132,3 +135,85 @@ def test_demo_full_20_episodes(tmp_path):
     assert "FirstFit" in res
     assert "BestFit" in res
     assert "DQN" in res
+
+
+def test_study_tiny(tmp_path):
+    """study on a tiny setting (seeds=(0, 1), episodes=1, n_vms=30) writes every key,
+
+    with 4 policies in summary and a ci95 for each metric.
+    """
+    out_json = tmp_path / "study.json"
+    res = study(out_json, seeds=(0, 1), episodes=1, n_vms=30, util_scale=1.4, host_slack=2.0)
+
+    # Top-level keys
+    expected_top_keys = [
+        "seeds",
+        "episodes",
+        "n_vms",
+        "util_scale",
+        "host_slack",
+        "n_hosts",
+        "summary",
+        "per_seed",
+        "total_seconds",
+    ]
+    for key in expected_top_keys:
+        assert key in res
+
+    assert res["seeds"] == [0, 1]
+    assert res["episodes"] == 1
+    assert res["n_vms"] == 30
+    assert res["util_scale"] == 1.4
+    assert res["host_slack"] == 2.0
+    assert len(res["n_hosts"]) == 2
+    assert len(res["per_seed"]) == 2
+    assert res["total_seconds"] > 0
+
+    # 4 policies in summary
+    policies = ["FirstFit", "BestFit", "DQN", "DQN_noK"]
+    assert set(res["summary"].keys()) == set(policies)
+
+    # 5 metrics in summary for each policy
+    metrics = [
+        "energy_kwh",
+        "sla_overload_frac",
+        "overloaded_host_step_frac",
+        "migrations",
+        "mean_active_hosts",
+    ]
+    for pol in policies:
+        assert set(res["summary"][pol].keys()) == set(metrics)
+        for m in metrics:
+            assert "mean" in res["summary"][pol][m]
+            assert "ci95" in res["summary"][pol][m]
+            assert isinstance(res["summary"][pol][m]["mean"], float)
+            assert isinstance(res["summary"][pol][m]["ci95"], float)
+
+    # Check per_seed structure
+    for seed_idx in range(2):
+        for pol in policies:
+            assert pol in res["per_seed"][seed_idx]
+            for m in metrics:
+                assert m in res["per_seed"][seed_idx][pol]
+
+    # File check: valid JSON, written with indent 2
+    assert out_json.exists()
+    loaded = json.loads(out_json.read_text(encoding="utf-8"))
+    assert loaded["seeds"] == [0, 1]
+    assert set(loaded["summary"].keys()) == set(policies)
+
+
+def test_study_single_seed(tmp_path):
+    """ci95 must be 0.0 when n = 1."""
+    out_json = tmp_path / "study_1seed.json"
+    res = study(out_json, seeds=(0,), episodes=1, n_vms=20, util_scale=1.0, host_slack=2.0)
+    for pol in ["FirstFit", "BestFit", "DQN", "DQN_noK"]:
+        for m in [
+            "energy_kwh",
+            "sla_overload_frac",
+            "overloaded_host_step_frac",
+            "migrations",
+            "mean_active_hosts",
+        ]:
+            assert res["summary"][pol][m]["ci95"] == 0.0
+

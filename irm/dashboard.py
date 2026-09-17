@@ -343,7 +343,15 @@ def make_handler(
                 self._send_json(200, None)
 
         def _handle_reports(self) -> None:
-            keys = ("overhead", "forecast", "placement", "lifetime", "forecast_local", "slo")
+            keys = (
+                "overhead",
+                "forecast",
+                "placement",
+                "lifetime",
+                "forecast_local",
+                "slo",
+                "placement_study",
+            )
             result: dict[str, Any] = {}
             for k in keys:
                 fpath = resolved_reports / f"{k}.json"

@@ -146,6 +146,73 @@
         </div>
       </div>
     </section>
+
+    <!-- Card 5: Proof: SLO experiment -->
+    <section class="card" id="card-slo">
+      <h2 class="card-title">Proof: SLO experiment</h2>
+      <div id="slo-placeholder" class="placeholder">Run: irm experiment slo</div>
+      <div id="slo-content" class="hidden">
+        <div id="slo-target" class="overhead-text"></div>
+        <div class="table-wrapper">
+          <table class="data-table" id="slo-table">
+            <thead>
+              <tr>
+                <th>Condition</th>
+                <th>p50 ms</th>
+                <th>p95 ms</th>
+                <th>p99 ms</th>
+                <th>p99 range</th>
+                <th>SLO violations %</th>
+                <th>cpuhog iterations/s</th>
+              </tr>
+            </thead>
+            <tbody id="slo-tbody">
+            </tbody>
+          </table>
+        </div>
+        <div class="sub-section" id="slo-plan-section">
+          <h3 class="sub-title">Applied Plan</h3>
+          <div class="table-wrapper">
+            <table class="data-table" id="slo-plan-table">
+              <thead>
+                <tr>
+                  <th>Cgroup</th>
+                  <th>cpu.max</th>
+                  <th>cpu.weight</th>
+                </tr>
+              </thead>
+              <tbody id="slo-plan-tbody">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Card 6: Plan: placement study -->
+    <section class="card" id="card-placement-study">
+      <h2 class="card-title">Plan: placement study</h2>
+      <div id="study-placeholder" class="placeholder">Run: irm evaluate study</div>
+      <div id="study-content" class="hidden">
+        <div id="study-caption" class="overhead-text"></div>
+        <div class="table-wrapper">
+          <table class="data-table" id="study-table">
+            <thead>
+              <tr>
+                <th>Policy</th>
+                <th>Energy kWh</th>
+                <th>SLA Overload %</th>
+                <th>Overloaded Host-Steps %</th>
+                <th>Migrations</th>
+                <th>Active Hosts</th>
+              </tr>
+            </thead>
+            <tbody id="study-tbody">
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   </main>
 
   <script src="/app.js"></script>

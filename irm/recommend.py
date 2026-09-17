@@ -86,6 +86,16 @@ def recommend(
             }
             cgroup_buckets[cg] = buckets
 
+    root_path = Path(root)
+    gone_cgs = [cg for cg in qualifying if not (root_path / cg.lstrip("/")).is_dir()]
+    for cg in gone_cgs:
+        del qualifying[cg]
+        cgroup_buckets.pop(cg, None)
+        skipped.append({
+            "cgroup": cg,
+            "reason": "gone: cgroup no longer exists",
+        })
+
     if isinstance(protect, str):
         protect_set = {protect}
     else:

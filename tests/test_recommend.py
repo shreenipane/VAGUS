@@ -31,6 +31,8 @@ def test_recommend_proportional_squeeze_and_memory(tmp_path, monkeypatch):
     p_dir.mkdir(parents=True)
     (p_dir / "cpu.max").write_text("max 100000\n", encoding="utf-8")
     (p_dir / "memory.high").write_text("max\n", encoding="utf-8")
+    (root / cg_o1.lstrip("/")).mkdir(parents=True)
+    (root / cg_o2.lstrip("/")).mkdir(parents=True)
 
     now = 1000000
     t_start = now - 120  # 2 minutes ago
@@ -127,6 +129,8 @@ def test_recommend_pairs(tmp_path, monkeypatch):
 
     cg_a = "/user.slice/user-1000.slice/user@1000.service/a.scope"
     cg_b = "/user.slice/user-1000.slice/user@1000.service/b.scope"
+    (root / cg_a.lstrip("/")).mkdir(parents=True)
+    (root / cg_b.lstrip("/")).mkdir(parents=True)
 
     now = 1000000
     # 12 buckets of 30s = 360s
@@ -171,6 +175,7 @@ def test_recommend_cli(tmp_path, monkeypatch, capsys):
     root = tmp_path / "cgroup"
 
     cg = "/user.slice/user-1000.slice/user@1000.service/app.scope"
+    (root / cg.lstrip("/")).mkdir(parents=True)
     now = int(time.time())
     with sqlite3.connect(db_path) as conn:
         for i in range(10):
@@ -207,6 +212,8 @@ def test_recommend_idle_leaves_are_background(tmp_path, monkeypatch):
         f"/user.slice/user-1000.slice/user@1000.service/idle_{i:02d}.scope"
         for i in range(50)
     ]
+    for cg in [cg_crit, cg_noisy] + idle_cgs:
+        (root / cg.lstrip("/")).mkdir(parents=True)
 
     now = 1000000
     t_start = now - 120
@@ -266,6 +273,8 @@ def test_recommend_budget_smaller_than_floors(tmp_path, monkeypatch):
     cg_t1 = "/user.slice/user-1000.slice/user@1000.service/t1.scope"
     cg_t2 = "/user.slice/user-1000.slice/user@1000.service/t2.scope"
     cg_t3 = "/user.slice/user-1000.slice/user@1000.service/t3.scope"
+    for cg in (cg_crit, cg_t1, cg_t2, cg_t3):
+        (root / cg.lstrip("/")).mkdir(parents=True)
 
     now = 1000000
     t_start = now - 120
@@ -312,6 +321,8 @@ def test_recommend_only_filters_non_protected_targets(tmp_path, monkeypatch):
 
     cg_noisy = "/user.slice/user-1000.slice/user@1000.service/noisy.scope"
     cg_busy2 = "/user.slice/user-1000.slice/user@1000.service/busy2.scope"
+    for cg in (cg_noisy, cg_busy2):
+        (root / cg.lstrip("/")).mkdir(parents=True)
 
     now = 1000000
     t_start = now - 120
@@ -358,6 +369,8 @@ def test_recommend_cli_min_cores_and_only(tmp_path, monkeypatch, capsys):
 
     cg1 = "/user.slice/user-1000.slice/user@1000.service/app1.scope"
     cg2 = "/user.slice/user-1000.slice/user@1000.service/app2.scope"
+    for cg in (cg1, cg2):
+        (root / cg.lstrip("/")).mkdir(parents=True)
     now = int(time.time())
     with sqlite3.connect(db_path) as conn:
         for i in range(10):
@@ -390,4 +403,53 @@ def test_recommend_cli_min_cores_and_only(tmp_path, monkeypatch, capsys):
     assert cg2 not in items
     skipped = {s["cgroup"]: s["reason"] for s in recs["skipped"]}
     assert skipped.get(cg2) == "background: not in --only"
+
+
+def test_recommend_skips_gone_cgroups(tmp_path, monkeypatch):
+    monkeypatch.setattr("os.cpu_count", lambda: 4)
+
+    db_path = tmp_path / "gone.db"
+    create_test_db(db_path)
+    root = tmp_path / "cgroup"
+
+    cg_a = "/a.scope"
+    cg_b = "/b.scope"
+
+    # Only a.scope exists in fixture root; b.scope does not exist
+    (root / cg_a.lstrip("/")).mkdir(parents=True)
+
+    now = 1000000
+    t_start = now - 120
+
+    with sqlite3.connect(db_path) as conn:
+        for i in range(24):
+            ts = t_start + i * 5
+            conn.execute(
+                "insert into samples (ts, cgroup, cpu_cores, netrx_attrib_cores, mem_bytes) "
+                "values (?, ?, ?, ?, ?)",
+                (ts, cg_a, 1.0, 0.0, 50 * 1024 * 1024),
+            )
+            conn.execute(
+                "insert into samples (ts, cgroup, cpu_cores, netrx_attrib_cores, mem_bytes) "
+                "values (?, ?, ?, ?, ?)",
+                (ts, cg_b, 1.0, 0.0, 50 * 1024 * 1024),
+            )
+        conn.commit()
+
+    recs = recommend(
+        db_path=db_path,
+        root=root,
+        min_samples=20,
+        hours=1.0,
+        now=now,
+    )
+
+    items = [it["cgroup"] for it in recs["items"]]
+    assert items == [cg_a]
+
+    skipped = {s["cgroup"]: s["reason"] for s in recs["skipped"]}
+    assert cg_b in skipped
+    assert skipped[cg_b] == "gone: cgroup no longer exists"
+    assert cg_a not in skipped
+
 

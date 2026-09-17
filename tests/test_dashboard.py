@@ -182,6 +182,8 @@ def test_missing_reports_returns_nulls(test_setup):
     assert reports["overhead"] is None
     assert reports["forecast"] is None
     assert reports["placement"] is None
+    assert reports["slo"] is None
+    assert reports["placement_study"] is None
 
 
 def test_reports_with_data(test_setup):
@@ -270,3 +272,123 @@ def test_present_recommendations(test_setup):
     assert status == 200
     assert len(data["items"]) == 1
     assert data["items"][0]["cgroup"] == "/leaf1"
+
+
+def test_reports_slo_and_placement_study(test_setup):
+    client, port, tmp_path = test_setup
+    reports_dir = tmp_path / "reports"
+    slo_fixture = {
+        "slo_target_ms": 12.34,
+        "minutes": 3,
+        "reps": 3,
+        "rate": 200,
+        "conditions": {
+            "A": {
+                "p50_ms": 1.2,
+                "p95_ms": 2.3,
+                "p99_ms": 3.4,
+                "rep_p99_ms": {"min": 3.1, "mean": 3.4, "max": 3.7},
+                "violation_rate": 0.0,
+                "rps": 200.0,
+                "errors": 0,
+                "cpuhog_ips": None,
+            },
+            "B": {
+                "p50_ms": 4.5,
+                "p95_ms": 9.8,
+                "p99_ms": 15.2,
+                "rep_p99_ms": {"min": 14.0, "mean": 15.2, "max": 16.5},
+                "violation_rate": 0.45,
+                "rps": 195.0,
+                "errors": 2,
+                "cpuhog_ips": 1200.5,
+            },
+            "C": {
+                "p50_ms": 1.8,
+                "p95_ms": 3.2,
+                "p99_ms": 4.8,
+                "rep_p99_ms": {"min": 4.5, "mean": 4.8, "max": 5.1},
+                "violation_rate": 0.01,
+                "rps": 199.5,
+                "errors": 0,
+                "cpuhog_ips": 1150.0,
+            },
+        },
+        "applied_plan": [
+            {"cgroup": "/user.slice/app.slice/cpuhog.scope", "cpu.max": "200000 100000", "cpu.weight": 100},
+        ],
+    }
+    study_fixture = {
+        "seeds": [0, 1, 2, 3, 4],
+        "episodes": 20,
+        "util_scale": 1.4,
+        "host_slack": 2.0,
+        "summary": {
+            "FirstFit": {
+                "energy_kwh": {"mean": 60.5, "ci95": 1.2},
+                "sla_overload_frac": {"mean": 0.025, "ci95": 0.003},
+                "overloaded_host_step_frac": {"mean": 0.22, "ci95": 0.01},
+                "migrations": {"mean": 0.0, "ci95": 0.0},
+                "mean_active_hosts": {"mean": 14.0, "ci95": 0.0},
+            },
+            "BestFit": {
+                "energy_kwh": {"mean": 60.4, "ci95": 1.1},
+                "sla_overload_frac": {"mean": 0.024, "ci95": 0.003},
+                "overloaded_host_step_frac": {"mean": 0.21, "ci95": 0.01},
+                "migrations": {"mean": 0.0, "ci95": 0.0},
+                "mean_active_hosts": {"mean": 14.0, "ci95": 0.0},
+            },
+            "DQN": {
+                "energy_kwh": {"mean": 58.2, "ci95": 0.9},
+                "sla_overload_frac": {"mean": 0.015, "ci95": 0.002},
+                "overloaded_host_step_frac": {"mean": 0.15, "ci95": 0.01},
+                "migrations": {"mean": 3.5, "ci95": 0.4},
+                "mean_active_hosts": {"mean": 13.2, "ci95": 0.3},
+            },
+            "DQN_noK": {
+                "energy_kwh": {"mean": 59.8, "ci95": 1.0},
+                "sla_overload_frac": {"mean": 0.020, "ci95": 0.002},
+                "overloaded_host_step_frac": {"mean": 0.18, "ci95": 0.01},
+                "migrations": {"mean": 2.1, "ci95": 0.3},
+                "mean_active_hosts": {"mean": 13.8, "ci95": 0.2},
+            },
+        },
+    }
+    (reports_dir / "slo.json").write_text(json.dumps(slo_fixture), encoding="utf-8")
+    (reports_dir / "placement_study.json").write_text(json.dumps(study_fixture), encoding="utf-8")
+
+    status, reports = client.get_json("/api/reports")
+    assert status == 200
+    assert reports["slo"] is not None
+    assert reports["slo"]["slo_target_ms"] == pytest.approx(12.34)
+    assert len(reports["slo"]["applied_plan"]) == 1
+    assert reports["placement_study"] is not None
+    assert reports["placement_study"]["util_scale"] == pytest.approx(1.4)
+    assert "DQN_noK" in reports["placement_study"]["summary"]
+
+
+def test_dashboard_ui_elements(test_setup):
+    client, port, _ = test_setup
+    status, _, body = client.request("GET", "/")
+    assert status == 200
+    html = body.decode("utf-8")
+    assert "Proof: SLO experiment" in html
+    assert "Run: irm experiment slo" in html
+    assert "Plan: placement study" in html
+    assert "Run: irm evaluate study" in html
+    assert "slo-table" in html
+    assert "study-table" in html
+
+    status, _, body = client.request("GET", "/app.js")
+    assert status == 200
+    js = body.decode("utf-8")
+    assert "renderSlo" in js
+    assert "renderPlacementStudy" in js
+    assert "textContent" in js
+    assert "innerHTML" not in js
+
+    status, _, body = client.request("GET", "/style.css")
+    assert status == 200
+    css = body.decode("utf-8")
+    assert ".highlight" in css
+

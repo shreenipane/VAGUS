@@ -81,6 +81,17 @@ def main(argv: list[str] | None = None) -> int:
     eval_placement = eval_subparsers.add_parser("placement")
     eval_placement.add_argument("--episodes", type=int, default=20)
     eval_placement.add_argument("--seed", type=int, default=0)
+    eval_study = eval_subparsers.add_parser("study")
+    eval_study.add_argument("--seeds", type=int, default=5)
+    eval_study.add_argument("--episodes", type=int, default=20)
+
+    # irm experiment
+    exp_parser = subparsers.add_parser("experiment")
+    exp_subparsers = exp_parser.add_subparsers(dest="experiment_subcommand")
+    exp_slo = exp_subparsers.add_parser("slo")
+    exp_slo.add_argument("--minutes", type=float, default=3.0)
+    exp_slo.add_argument("--reps", type=int, default=3)
+    exp_slo.add_argument("--rate", type=float, default=200.0)
 
     if argv is None:
         argv = sys.argv[1:]
@@ -178,12 +189,26 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 train_parser.print_help()
                 return 2
+        elif args.subcommand == "experiment":
+            if getattr(args, "experiment_subcommand", None) == "slo":
+                from irm.experiment import run_slo
+                out_path = HOME / "reports" / "slo.json"
+                run_slo(out_path, minutes=args.minutes, reps=args.reps, rate=args.rate)
+                return 0
+            else:
+                exp_parser.print_help()
+                return 2
         elif args.subcommand == "evaluate":
             if getattr(args, "evaluate_subcommand", None) == "placement":
                 from irm.dqn import demo
                 out_path = HOME / "reports" / "placement.json"
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 demo(out_path, args.seed, args.episodes)
+                return 0
+            elif getattr(args, "evaluate_subcommand", None) == "study":
+                from irm.dqn import study
+                out_path = HOME / "reports" / "placement_study.json"
+                study(out_path, seeds=list(range(args.seeds)), episodes=args.episodes)
                 return 0
             else:
                 eval_parser.print_help()

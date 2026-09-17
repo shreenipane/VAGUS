@@ -33,6 +33,8 @@ async function refreshAll() {
     if (reportsRes.ok) {
       const reports = await reportsRes.json();
       renderAnalyse(reports);
+      renderSlo(reports ? reports.slo : null);
+      renderPlacementStudy(reports ? reports.placement_study : null);
     }
   } catch (err) {
     // Network / parse error, maintain current UI state without crashing
@@ -668,3 +670,226 @@ function createForecastExampleSvg(ex) {
 
   return svg;
 }
+
+function formatMeanCi(stat, decimals, isPercent) {
+  if (!stat || stat.mean == null) {
+    return "-";
+  }
+  const mult = isPercent ? 100 : 1;
+  const suffix = isPercent ? "%" : "";
+  const meanVal = (stat.mean * mult).toFixed(decimals);
+  const ciVal = stat.ci95 != null ? (stat.ci95 * mult).toFixed(decimals) : (0).toFixed(decimals);
+  return `${meanVal}${suffix} \u00b1 ${ciVal}${suffix}`;
+}
+
+function renderSlo(slo) {
+  const placeholder = document.getElementById("slo-placeholder");
+  const content = document.getElementById("slo-content");
+  const targetEl = document.getElementById("slo-target");
+  const tbody = document.getElementById("slo-tbody");
+  const planSection = document.getElementById("slo-plan-section");
+  const planTbody = document.getElementById("slo-plan-tbody");
+
+  clearElement(tbody);
+  clearElement(planTbody);
+
+  if (!slo) {
+    if (placeholder) placeholder.classList.remove("hidden");
+    if (content) content.classList.add("hidden");
+    return;
+  }
+
+  if (placeholder) placeholder.classList.add("hidden");
+  if (content) content.classList.remove("hidden");
+
+  // Above it: "SLO target: X ms (2 × p99 alone) · N reps × M min at R rps"
+  const targetMs = slo.slo_target_ms != null ? (typeof slo.slo_target_ms === "number" ? slo.slo_target_ms.toFixed(2) : slo.slo_target_ms) : "-";
+  const reps = slo.reps != null ? slo.reps : "-";
+  const min = slo.minutes != null ? slo.minutes : "-";
+  const rate = slo.rate != null ? slo.rate : "-";
+  if (targetEl) {
+    targetEl.textContent = `SLO target: ${targetMs} ms (2 \u00d7 p99 alone) \u00b7 ${reps} reps \u00d7 ${min} min at ${rate} rps`;
+  }
+
+  const conditions = slo.conditions || {};
+
+  // Highlight lowest p99 among B and C
+  const bP99 = conditions.B && conditions.B.p99_ms != null ? conditions.B.p99_ms : null;
+  const cP99 = conditions.C && conditions.C.p99_ms != null ? conditions.C.p99_ms : null;
+  let lowestCond = null;
+  if (bP99 != null && cP99 != null) {
+    if (cP99 < bP99) {
+      lowestCond = "C";
+    } else if (bP99 < cP99) {
+      lowestCond = "B";
+    } else {
+      lowestCond = "both";
+    }
+  } else if (bP99 != null) {
+    lowestCond = "B";
+  } else if (cP99 != null) {
+    lowestCond = "C";
+  }
+
+  const condRows = [
+    { key: "A", label: "A (alone)" },
+    { key: "B", label: "B (co-located)" },
+    { key: "C", label: "C (co-located + irm)" },
+  ];
+
+  if (tbody) {
+    condRows.forEach(({ key, label }) => {
+      const c = conditions[key] || {};
+      const tr = document.createElement("tr");
+      tr.setAttribute("data-condition", key);
+
+      const tdCond = document.createElement("td");
+      tdCond.textContent = label;
+
+      const tdP50 = document.createElement("td");
+      tdP50.textContent = c.p50_ms != null ? (typeof c.p50_ms === "number" ? c.p50_ms.toFixed(2) : c.p50_ms) : "-";
+
+      const tdP95 = document.createElement("td");
+      tdP95.textContent = c.p95_ms != null ? (typeof c.p95_ms === "number" ? c.p95_ms.toFixed(2) : c.p95_ms) : "-";
+
+      const tdP99 = document.createElement("td");
+      tdP99.textContent = c.p99_ms != null ? (typeof c.p99_ms === "number" ? c.p99_ms.toFixed(2) : c.p99_ms) : "-";
+      if ((key === "B" || key === "C") && (lowestCond === key || lowestCond === "both")) {
+        tdP99.classList.add("highlight");
+        tdP99.classList.add("lowest-p99");
+        tdP99.setAttribute("title", "Lowest p99");
+      }
+
+      const tdRange = document.createElement("td");
+      if (c.rep_p99_ms) {
+        const rMin = c.rep_p99_ms.min != null ? c.rep_p99_ms.min : (Array.isArray(c.rep_p99_ms) ? c.rep_p99_ms[0] : null);
+        const rMax = c.rep_p99_ms.max != null ? c.rep_p99_ms.max : (Array.isArray(c.rep_p99_ms) ? c.rep_p99_ms[c.rep_p99_ms.length - 1] : null);
+        if (rMin != null && rMax != null) {
+          const minStr = typeof rMin === "number" ? rMin.toFixed(2) : rMin;
+          const maxStr = typeof rMax === "number" ? rMax.toFixed(2) : rMax;
+          tdRange.textContent = `${minStr}\u2013${maxStr}`;
+        } else {
+          tdRange.textContent = "-";
+        }
+      } else {
+        tdRange.textContent = "-";
+      }
+
+      const tdViol = document.createElement("td");
+      tdViol.textContent = c.violation_rate != null ? (typeof c.violation_rate === "number" ? (c.violation_rate * 100).toFixed(1) + "%" : c.violation_rate) : "-";
+
+      const tdCpuhog = document.createElement("td");
+      if (key === "A") {
+        tdCpuhog.textContent = "\u2014"; // em-dash for A
+      } else {
+        tdCpuhog.textContent = c.cpuhog_ips != null ? (typeof c.cpuhog_ips === "number" ? c.cpuhog_ips.toFixed(1) : c.cpuhog_ips) : "-";
+      }
+
+      tr.appendChild(tdCond);
+      tr.appendChild(tdP50);
+      tr.appendChild(tdP95);
+      tr.appendChild(tdP99);
+      tr.appendChild(tdRange);
+      tr.appendChild(tdViol);
+      tr.appendChild(tdCpuhog);
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  // Below it: the applied_plan items (cgroup short name, cpu.max, cpu.weight)
+  if (planSection && planTbody) {
+    if (Array.isArray(slo.applied_plan) && slo.applied_plan.length > 0) {
+      planSection.classList.remove("hidden");
+      slo.applied_plan.forEach((item) => {
+        const tr = document.createElement("tr");
+
+        const shortName = (item.cgroup || "").split("/").filter(Boolean).pop() || item.cgroup || "-";
+        const tdCg = document.createElement("td");
+        tdCg.textContent = shortName;
+        if (item.cgroup) {
+          tdCg.setAttribute("title", item.cgroup);
+        }
+
+        const tdMax = document.createElement("td");
+        tdMax.textContent = item["cpu.max"] != null ? item["cpu.max"] : (item.cpu_max != null ? item.cpu_max : "-");
+
+        const tdWeight = document.createElement("td");
+        tdWeight.textContent = item["cpu.weight"] != null ? item["cpu.weight"] : (item.cpu_weight != null ? item.cpu_weight : "-");
+
+        tr.appendChild(tdCg);
+        tr.appendChild(tdMax);
+        tr.appendChild(tdWeight);
+
+        planTbody.appendChild(tr);
+      });
+    } else {
+      planSection.classList.add("hidden");
+    }
+  }
+}
+
+function renderPlacementStudy(study) {
+  const placeholder = document.getElementById("study-placeholder");
+  const content = document.getElementById("study-content");
+  const captionEl = document.getElementById("study-caption");
+  const tbody = document.getElementById("study-tbody");
+
+  clearElement(tbody);
+
+  if (!study) {
+    if (placeholder) placeholder.classList.remove("hidden");
+    if (content) content.classList.add("hidden");
+    return;
+  }
+
+  if (placeholder) placeholder.classList.add("hidden");
+  if (content) content.classList.remove("hidden");
+
+  // Caption: "N seeds · util ×U · host slack ×S"
+  const nSeeds = Array.isArray(study.seeds) ? study.seeds.length : (study.seeds != null ? study.seeds : "-");
+  const uStr = study.util_scale != null ? (typeof study.util_scale === "number" ? study.util_scale.toFixed(1) : study.util_scale) : "-";
+  const sStr = study.host_slack != null ? (typeof study.host_slack === "number" ? (Number.isInteger(study.host_slack) ? study.host_slack.toString() : study.host_slack.toFixed(1)) : study.host_slack) : "-";
+  if (captionEl) {
+    captionEl.textContent = `${nSeeds} seeds \u00b7 util \u00d7${uStr} \u00b7 host slack \u00d7${sStr}`;
+  }
+
+  // Rows FirstFit, BestFit, DQN, DQN_noK
+  const policies = ["FirstFit", "BestFit", "DQN", "DQN_noK"];
+  const summary = study.summary || {};
+
+  if (tbody) {
+    policies.forEach((pol) => {
+      const m = summary[pol] || {};
+      const tr = document.createElement("tr");
+
+      const tdPol = document.createElement("td");
+      tdPol.textContent = pol;
+
+      const tdEnergy = document.createElement("td");
+      tdEnergy.textContent = formatMeanCi(m.energy_kwh, 2, false);
+
+      const tdSla = document.createElement("td");
+      tdSla.textContent = formatMeanCi(m.sla_overload_frac, 2, true);
+
+      const tdHostSteps = document.createElement("td");
+      tdHostSteps.textContent = formatMeanCi(m.overloaded_host_step_frac, 2, true);
+
+      const tdMig = document.createElement("td");
+      tdMig.textContent = formatMeanCi(m.migrations, 1, false);
+
+      const tdHosts = document.createElement("td");
+      tdHosts.textContent = formatMeanCi(m.mean_active_hosts, 1, false);
+
+      tr.appendChild(tdPol);
+      tr.appendChild(tdEnergy);
+      tr.appendChild(tdSla);
+      tr.appendChild(tdHostSteps);
+      tr.appendChild(tdMig);
+      tr.appendChild(tdHosts);
+
+      tbody.appendChild(tr);
+    });
+  }
+}
+

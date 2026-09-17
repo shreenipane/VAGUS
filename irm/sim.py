@@ -33,7 +33,9 @@ def compute_k(x: np.ndarray, y: np.ndarray) -> float:
     return float((1.0 - r) / 2.0)
 
 
-def synthetic_cluster(n_vms: int, steps: int, seed: int = 0) -> dict:
+def synthetic_cluster(
+    n_vms: int, steps: int, seed: int = 0, util_scale: float = 1.0
+) -> dict:
     """Generate synthetic VM traces for simulation.
 
     Returns dict with keys:
@@ -86,12 +88,12 @@ def synthetic_cluster(n_vms: int, steps: int, seed: int = 0) -> dict:
     # Occasional bursts (Pareto shape 1.5)
     burst_mask = rng.random(size=(n_vms, steps)) < 0.015
     burst_vals = rng.pareto(1.5, size=(n_vms, steps)) * 15.0
-    series = base + noise + np.where(burst_mask, burst_vals, 0.0)
+    series = (base + noise + np.where(burst_mask, burst_vals, 0.0)) * util_scale
 
-    cpu_max = np.clip(series, 1.0, 100.0).astype(np.float32)
+    cpu_max = np.clip(series, 0.0, 100.0).astype(np.float32)
     # cpu_avg is a fraction of cpu_max, between 60% and 95%
     avg_factors = rng.uniform(0.6, 0.95, size=(n_vms, steps)).astype(np.float32)
-    cpu_avg = np.clip(cpu_max * avg_factors, 0.5, cpu_max).astype(np.float32)
+    cpu_avg = np.clip(cpu_max * avg_factors, 0.0, cpu_max).astype(np.float32)
 
     # Set NaN where unobserved (t < created or t >= deleted)
     t_grid = t_arr[np.newaxis, :]
@@ -166,6 +168,7 @@ class Simulator:
         weights: tuple[float, float, float] = (10.0, 1.0, 0.1),
         on_transition: Callable | None = None,
         n_hosts: int | None = None,
+        use_k: bool = True,
     ):
         self.data = data
         self.t0 = t0
@@ -173,6 +176,7 @@ class Simulator:
         self.policy = policy
         self.w_sla, self.w_energy, self.w_mig = weights
         self.on_transition = on_transition
+        self.use_k = use_k
 
         self.cpu_max = data["cpu_max"]
         self.cpu_avg = data["cpu_avg"]
@@ -242,7 +246,7 @@ class Simulator:
 
         # Precompute v's series for K
         s_start = max(0, s - K_WINDOW)
-        x_k = (self.cpu_max[v, s_start:s] / 100.0) * v_cores
+        x_k = (self.cpu_max[v, s_start:s] / 100.0) * v_cores if self.use_k else None
 
         for i, h in enumerate(candidates):
             vms_on_h = host_vms[h]
@@ -264,16 +268,19 @@ class Simulator:
             h_q95_frac = h_q95_sum / HOST_CORES
 
             # K(v, h)
-            other_vms = [u for u in vms_on_h if u != v]
-            if not other_vms:
+            if not self.use_k:
                 k_val = 0.5
             else:
-                y_k = np.zeros_like(x_k)
-                for u in other_vms:
-                    u_hist = self.cpu_max[u, s_start:s]
-                    u_demand = np.nan_to_num(u_hist / 100.0, nan=0.0) * self.cores[u]
-                    y_k += u_demand
-                k_val = compute_k(x_k, y_k)
+                other_vms = [u for u in vms_on_h if u != v]
+                if not other_vms:
+                    k_val = 0.5
+                else:
+                    y_k = np.zeros_like(x_k)
+                    for u in other_vms:
+                        u_hist = self.cpu_max[u, s_start:s]
+                        u_demand = np.nan_to_num(u_hist / 100.0, nan=0.0) * self.cores[u]
+                        y_k += u_demand
+                    k_val = compute_k(x_k, y_k)
 
             post_q95_frac = h_q95_frac + vm_q95_frac
 

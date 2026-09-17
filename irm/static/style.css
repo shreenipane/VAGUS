@@ -231,3 +231,18 @@ body {
 .hidden {
   display: none !important;
 }
+
+.highlight,
+.lowest-p99 {
+  color: #16a34a;
+  background-color: var(--accent-light);
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .highlight,
+  .lowest-p99 {
+    color: #4ade80;
+  }
+}
+
