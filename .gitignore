@@ -1,0 +1,10 @@
+data/
+models/
+.tasks/runs/
+__pycache__/
+.pytest_cache/
+.venv/
+bpf/vmlinux.h
+bpf/*.o
+bpf/*.skel.h
+bpf/attrib
