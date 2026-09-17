@@ -44,8 +44,8 @@ reports/                           generated, committed
 
 | Command | Options (default) |
 |---|---|
-| `irm monitor` | `--interval 5` `--db` `--root /sys/fs/cgroup` `--proc /proc` `--attrib` (unset, or `-` for stdin) `--retention-hours 48` |
-| `irm bench overhead` | `--seconds 60` `--interval 5` |
+| `irm monitor` | `--interval 5` `--db` `--root /sys/fs/cgroup` `--proc /proc` `--attrib` (unset, or `-` for stdin) `--retention-hours 48` `--duration` (unset = forever) |
+| `irm bench overhead` | `--seconds 60` `--interval 5` `--root` `--proc` |
 | `irm data fetch` | `--files 20` `--last-file 195` `--sample-per-mille 20` |
 | `irm data prepare` | `--max-vms 5000` `--seed 0` |
 | `irm train lifetime` | — |

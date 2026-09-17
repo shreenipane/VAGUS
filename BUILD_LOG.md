@@ -9,6 +9,7 @@ Nothing is marked done without a runnable check.
 - [Status](#status)
 - [Phase D — documentation and containment](#phase-d--documentation-and-containment)
 - [Phase 0 — scaffold](#phase-0--scaffold)
+- [Phase 1 — monitor](#phase-1--monitor)
 
 ## Operating rules
 
@@ -31,7 +32,8 @@ Nothing is marked done without a runnable check.
 |---|---|
 | D — documentation and containment | **Done** — containment verified (D.5–D.7) |
 | 0 — scaffold | **Done** |
-| 1 — monitor | Dispatched |
+| 1 — monitor | **Done** — overhead 0.68% of one core (R10) |
+| 2 — attribution | 2a (userspace) dispatched; 2b (BPF) waits for the toolchain install |
 | 2–13 | Not started |
 
 ---
@@ -154,5 +156,33 @@ The jail probe moved to `.tasks/test_jail_probe.py` and runs at every gate.
 | Architect `irm-test -q` | `3 passed` |
 | Outside the jail | `irm --version` → `irm 0.1.0`; no arguments → help, exit 2 |
 | Ponytail | 4 + 5 + 15 lines; nothing unrequested |
+
+**Accepted.**
+
+---
+
+## Phase 1 — monitor
+
+**Specs:** `.tasks/01-monitor.md`, then fragment `.tasks/01b-monitor-simplify.md`. Both dispatches: `denied_actions`
+none, only the listed files changed.
+
+### 1.1 First delivery: correct but bloated
+Agent: `15 passed`. Architect review of `irm/monitor.py` (555 lines): behaviour matched the spec, but the same
+missing-file/`ENODEV`/vanished-directory handling was copied into six readers, `is_dir()` ran after every failed read,
+and rate code was copied three times. `irm-test run bench overhead --seconds 60`: **0.97% of one core**, 135 leaf
+cgroups, right at the 1% target.
+
+Unrequested but kept: `monitor --duration` (needed by the SLO experiment and smoke runs), `--root/--proc` on the
+benchmark. TRD §2 updated.
+
+### 1.2 Simplification fragment
+Tests untouched (`tests/test_monitor.py` mtime predates the fragment). Result: **284 lines**, `15 passed` (agent and
+architect), benchmark **0.68% of one core** (0.043% of the host), 135 leaves. R10 verified.
+
+### 1.3 Real run in the jail
+`irm-test run monitor --interval 5` into `data/processed/smoke.db` (deleted afterwards): 136 rows per sweep (135 leaves +
+host); host 0.68–0.73 cores and 6.2 GiB used, consistent with `top` (~3% busy of 16 CPUs) and `free`; first host row has
+NULL rates as specified; busiest leaves are the terminal and Firefox scopes; `io_rbps` NULL for 97 leaves where the io
+controller is not enabled (expected).
 
 **Accepted.**
