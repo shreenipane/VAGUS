@@ -75,9 +75,26 @@ irm train forecast                     # attention-LSTM P95 forecaster vs last-w
 irm evaluate placement                 # simulated cluster: First-Fit, Best-Fit, DQN → reports/placement.json
 ```
 
-Both use synthetic workloads in the prototype and take about 1–3 minutes on CPU. Models are saved to `models/`. To
+```sh
+irm evaluate study --seeds 5 --episodes 20   # stressed cluster, 5 seeds, FirstFit/BestFit/DQN/DQN without K,
+                                             # mean ± 95% CI → reports/placement_study.json (~20–30 min)
+```
+
+The first two use synthetic workloads in the prototype and take about 1–3 minutes on CPU. Models are saved to `models/`. To
 run them jailed (recommended for code you have not reviewed): `irm-test run train forecast`, `irm-test run evaluate
 placement`. The dashboard's Analyse card shows the results.
+
+## 3b. Live SLO experiment (proof of the SLA claim)
+
+```sh
+irm experiment slo --minutes 3 --reps 3 --rate 200   # ~35 min; → reports/slo.json, shown on the dashboard
+```
+
+Runs a latency-sensitive HTTP service in its own systemd user scope under three conditions, in rotating order:
+**A** alone, **B** next to a CPU hog (one busy process per CPU) and a loopback UDP flood, **C** the same as B after
+`irm` monitors for 60 s, recommends (service protected, only the hogs limited), and applies. Latency is measured
+open-loop from each request's scheduled time. Every scope is stopped and every limit reverted when it ends, even on
+Ctrl-C. Run it on an otherwise idle machine (close heavy apps; do not run the study at the same time).
 
 ## 4. Tests
 
@@ -106,7 +123,6 @@ Step-by-step faculty demo with talking points: [DEMO.md](DEMO.md).
 |---|---|
 | eBPF softirq attribution: `sudo bpf/attrib \| irm monitor --attrib -` | `sudo dnf install -y clang llvm bpftool libbpf-devel elfutils-libelf-devel zlib-devel`, then Phase 2b |
 | Real Azure 2019 trace: `irm data fetch`, `irm data prepare` | Phase 3; ~17 GB streamed, ~2% kept |
-| Live SLO experiment: `irm experiment slo` | Phase 11 |
 | One-command reproduction: `irm reproduce` | Phase 12 |
 
 ## Troubleshooting

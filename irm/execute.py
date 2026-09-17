@@ -23,17 +23,26 @@ def validate(
         return f"cgroup '{cgroup}' contains '..' component"
 
     uid = os.getuid()
-    prefixes = [f"/user.slice/user-{uid}.slice/user@{uid}.service/"]
-    if allow:
-        prefixes.extend(allow)
-
     root_resolved = Path(root).resolve()
     target_dir = (root_resolved / cgroup.lstrip("/")).resolve()
 
+    allowed_prefixes = [(root_resolved / f"user.slice/user-{uid}.slice/user@{uid}.service").resolve()]
+    if allow:
+        for entry in allow:
+            if not isinstance(entry, str) or not entry.startswith("/"):
+                continue
+            if ".." in entry.split("/"):
+                continue
+            pfx_path = (root_resolved / entry.lstrip("/")).resolve()
+            try:
+                cp = os.path.commonpath([str(root_resolved), str(pfx_path)])
+                if cp == str(root_resolved) and str(pfx_path) != str(root_resolved):
+                    allowed_prefixes.append(pfx_path)
+            except ValueError:
+                pass
+
     strictly_inside = False
-    for pfx in prefixes:
-        pfx_clean = pfx.strip()
-        pfx_path = (root_resolved / pfx_clean.lstrip("/")).resolve()
+    for pfx_path in allowed_prefixes:
         try:
             cp = os.path.commonpath([str(pfx_path), str(target_dir)])
             if cp == str(pfx_path) and str(target_dir) != str(pfx_path):
@@ -46,18 +55,18 @@ def validate(
         return f"cgroup '{cgroup}' is not strictly inside any allowed prefix"
 
     controllers_file = target_dir / "cgroup.controllers"
-    if not controllers_file.is_file() and not controllers_file.exists():
+    if not controllers_file.is_file():
         return f"cgroup.controllers does not exist in '{cgroup}'"
 
     if file not in ("cpu.max", "memory.high", "cpu.weight"):
         return f"disallowed file '{file}'"
 
-    val_str = str(value).strip() if value is not None else ""
+    val_str = str(value) if value is not None else ""
     if file == "cpu.max":
         if val_str in ("max", "max 100000"):
             pass
         else:
-            m = re.match(r"^([0-9]+) 100000$", val_str)
+            m = re.fullmatch(r"([0-9]+) 100000", val_str)
             if not m:
                 return f"invalid cpu.max value '{val_str}'"
             quota = int(m.group(1))
@@ -66,14 +75,14 @@ def validate(
     elif file == "memory.high":
         if val_str == "max":
             pass
-        elif val_str.isdigit():
+        elif re.fullmatch(r"[0-9]+", val_str):
             val_int = int(val_str)
             if val_int < 67108864:
                 return f"memory.high value {val_int} < 67108864 (64 MiB)"
         else:
             return f"invalid memory.high value '{val_str}'"
     elif file == "cpu.weight":
-        if val_str.isdigit():
+        if re.fullmatch(r"[0-9]+", val_str):
             val_int = int(val_str)
             if not (1 <= val_int <= 10000):
                 return f"cpu.weight value {val_int} not in 1-10000"
@@ -107,7 +116,7 @@ def apply(
 
         for file, val in changes:
             clamped = False
-            if file == "memory.high" and val != "max" and val.isdigit():
+            if file == "memory.high" and val != "max" and re.fullmatch(r"[0-9]+", val):
                 cur_path = root_path / cg.lstrip("/") / "memory.current"
                 if cur_path.is_file():
                     try:

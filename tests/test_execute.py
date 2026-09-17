@@ -230,3 +230,49 @@ def test_evaluate_placement_cli(monkeypatch):
     assert len(called) == 1
     assert called[0][1:] == (7, 10)
 
+
+def test_validate_allow_sanitization(tmp_path):
+    root = tmp_path / "cgroup"
+    service_dir = root / "system.slice" / "x.service"
+    service_dir.mkdir(parents=True)
+    (service_dir / "cgroup.controllers").write_text("cpu memory\n", encoding="utf-8")
+    cg = "/system.slice/x.service"
+
+    for bad in (["/"], [".."], ["../.."], ["relative"]):
+        err = validate(root, cg, "cpu.max", "max 100000", allow=bad)
+        assert err is not None
+        assert "not strictly inside" in err
+
+    err = validate(root, cg, "cpu.max", "max 100000", allow=["/system.slice/"])
+    assert err is None
+
+
+def test_validate_non_ascii_and_whitespace_numbers(fake_tree):
+    root, app_dir = fake_tree
+    cg = "/user.slice/user-1000.slice/user@1000.service/app.slice"
+    bad_values = ["²", "٥٠٠", " 5", "5\n"]
+
+    for bad in bad_values:
+        err_mem = validate(root, cg, "memory.high", bad)
+        assert err_mem is not None and isinstance(err_mem, str)
+
+        err_weight = validate(root, cg, "cpu.weight", bad)
+        assert err_weight is not None and isinstance(err_weight, str)
+
+        err_quota = validate(root, cg, "cpu.max", f"{bad} 100000")
+        assert err_quota is not None and isinstance(err_quota, str)
+
+
+def test_validate_controllers_as_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr("os.getuid", lambda: 1000)
+    root = tmp_path / "cgroup"
+    app_dir = root / "user.slice" / "user-1000.slice" / "user@1000.service" / "app.slice"
+    controllers = app_dir / "cgroup.controllers"
+    controllers.mkdir(parents=True)
+    cg = "/user.slice/user-1000.slice/user@1000.service/app.slice"
+
+    err = validate(root, cg, "cpu.max", "max 100000")
+    assert err is not None
+    assert "cgroup.controllers does not exist" in err
+
+

@@ -310,6 +310,9 @@ Constants: `HOST_CORES 48`, `HOST_MEM_GB 384`, `OVERCOMMIT 2.0`, `P_IDLE_W 100`,
 - Save `models/dqn.pt` `{"state_dict", "w_sla", "w_energy", "w_mig"}`; load with `weights_only=True`.
 - `irm evaluate placement`: FirstFit, BestFit, DQN (greedy) on the test range → `reports/placement.json`
   `{policy: metrics, "n_hosts", "t0", "t1", "weights"}`.
+- `irm evaluate study` (added after the prototype; `.tasks/p8-dqn-study.md`): seeds 0–4, `util_scale 1.4`,
+  `host_slack 2.0` so placement choices matter; policies FirstFit, BestFit, DQN, and DQN_noK (K feature fixed at 0.5,
+  trained and evaluated that way) → `reports/placement_study.json` with mean and `ci95 = 1.96 × std / √n` per metric.
 
 ## 11. Live recommender
 

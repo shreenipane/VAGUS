@@ -1,0 +1,323 @@
+{
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "episodes": 20,
+  "n_vms": 400,
+  "util_scale": 1.4,
+  "host_slack": 2.0,
+  "n_hosts": [
+    30,
+    28,
+    28,
+    27,
+    28
+  ],
+  "summary": {
+    "FirstFit": {
+      "energy_kwh": {
+        "mean": 68.28427276611328,
+        "ci95": 1.2616150874018945
+      },
+      "sla_overload_frac": {
+        "mean": 0.15662533342838286,
+        "ci95": 0.003759307413275555
+      },
+      "overloaded_host_step_frac": {
+        "mean": 0.4567327460234839,
+        "ci95": 0.007692754884502642
+      },
+      "migrations": {
+        "mean": 2.2,
+        "ci95": 3.417376771735888
+      },
+      "mean_active_hosts": {
+        "mean": 13.875694444444445,
+        "ci95": 0.21126180842151981
+      }
+    },
+    "BestFit": {
+      "energy_kwh": {
+        "mean": 68.24788665771484,
+        "ci95": 1.308787925289411
+      },
+      "sla_overload_frac": {
+        "mean": 0.15725364685058593,
+        "ci95": 0.0030758054702404135
+      },
+      "overloaded_host_step_frac": {
+        "mean": 0.457739327762719,
+        "ci95": 0.007012394809340552
+      },
+      "migrations": {
+        "mean": 2.8,
+        "ci95": 3.582030708969425
+      },
+      "mean_active_hosts": {
+        "mean": 13.865277777777777,
+        "ci95": 0.2315329616829511
+      }
+    },
+    "DQN": {
+      "energy_kwh": {
+        "mean": 69.2076431274414,
+        "ci95": 1.375839611354556
+      },
+      "sla_overload_frac": {
+        "mean": 0.10599738657474518,
+        "ci95": 0.008196697595355747
+      },
+      "overloaded_host_step_frac": {
+        "mean": 0.3684007322014792,
+        "ci95": 0.03326245028741185
+      },
+      "migrations": {
+        "mean": 47.0,
+        "ci95": 11.512393321981317
+      },
+      "mean_active_hosts": {
+        "mean": 14.007638888888891,
+        "ci95": 0.24301075142602624
+      }
+    },
+    "DQN_noK": {
+      "energy_kwh": {
+        "mean": 69.37765197753906,
+        "ci95": 1.5149013217603255
+      },
+      "sla_overload_frac": {
+        "mean": 0.10453365296125412,
+        "ci95": 0.008849379505905636
+      },
+      "overloaded_host_step_frac": {
+        "mean": 0.36964005786042653,
+        "ci95": 0.024358022813879963
+      },
+      "migrations": {
+        "mean": 50.4,
+        "ci95": 14.032833498620299
+      },
+      "mean_active_hosts": {
+        "mean": 14.059027777777777,
+        "ci95": 0.2863918155093482
+      }
+    }
+  },
+  "per_seed": [
+    {
+      "FirstFit": {
+        "energy_kwh": 69.60047149658203,
+        "sla_overload_frac": 0.15618932247161865,
+        "overloaded_host_step_frac": 0.4714781746031746,
+        "migrations": 0,
+        "rejected": 0,
+        "mean_active_hosts": 14.0,
+        "decisions": 320,
+        "overload": 29251.8984375
+      },
+      "BestFit": {
+        "energy_kwh": 69.60047149658203,
+        "sla_overload_frac": 0.15618932247161865,
+        "overloaded_host_step_frac": 0.4714781746031746,
+        "migrations": 0,
+        "rejected": 0,
+        "mean_active_hosts": 14.0,
+        "decisions": 320,
+        "overload": 29251.8984375
+      },
+      "DQN": {
+        "energy_kwh": 70.7924575805664,
+        "sla_overload_frac": 0.10380269587039948,
+        "overloaded_host_step_frac": 0.37512218963831867,
+        "migrations": 49,
+        "rejected": 0,
+        "mean_active_hosts": 14.208333333333334,
+        "decisions": 369,
+        "overload": 19440.650390625
+      },
+      "DQN_noK": {
+        "energy_kwh": 71.28262329101562,
+        "sla_overload_frac": 0.09130196273326874,
+        "overloaded_host_step_frac": 0.3660606060606061,
+        "migrations": 64,
+        "rejected": 0,
+        "mean_active_hosts": 14.322916666666666,
+        "decisions": 384,
+        "overload": 17099.47265625
+      }
+    },
+    {
+      "FirstFit": {
+        "energy_kwh": 68.06938171386719,
+        "sla_overload_frac": 0.16201423108577728,
+        "overloaded_host_step_frac": 0.452642073778664,
+        "migrations": 9,
+        "rejected": 0,
+        "mean_active_hosts": 13.930555555555555,
+        "decisions": 326,
+        "overload": 29225.02734375
+      },
+      "BestFit": {
+        "energy_kwh": 68.06938171386719,
+        "sla_overload_frac": 0.16201423108577728,
+        "overloaded_host_step_frac": 0.452642073778664,
+        "migrations": 9,
+        "rejected": 0,
+        "mean_active_hosts": 13.930555555555555,
+        "decisions": 326,
+        "overload": 29225.02734375
+      },
+      "DQN": {
+        "energy_kwh": 68.93599700927734,
+        "sla_overload_frac": 0.10619621723890305,
+        "overloaded_host_step_frac": 0.3190911336132378,
+        "migrations": 58,
+        "rejected": 0,
+        "mean_active_hosts": 14.059027777777779,
+        "decisions": 375,
+        "overload": 19156.248046875
+      },
+      "DQN_noK": {
+        "energy_kwh": 69.27478790283203,
+        "sla_overload_frac": 0.10752104222774506,
+        "overloaded_host_step_frac": 0.3339045287637699,
+        "migrations": 68,
+        "rejected": 0,
+        "mean_active_hosts": 14.184027777777779,
+        "decisions": 385,
+        "overload": 19395.23046875
+      }
+    },
+    {
+      "FirstFit": {
+        "energy_kwh": 68.93586730957031,
+        "sla_overload_frac": 0.15158849954605103,
+        "overloaded_host_step_frac": 0.4506448412698413,
+        "migrations": 0,
+        "rejected": 0,
+        "mean_active_hosts": 14.0,
+        "decisions": 321,
+        "overload": 27801.712890625
+      },
+      "BestFit": {
+        "energy_kwh": 68.8947525024414,
+        "sla_overload_frac": 0.15402455627918243,
+        "overloaded_host_step_frac": 0.45262896825396826,
+        "migrations": 0,
+        "rejected": 0,
+        "mean_active_hosts": 14.0,
+        "decisions": 321,
+        "overload": 28248.529296875
+      },
+      "DQN": {
+        "energy_kwh": 69.87235260009766,
+        "sla_overload_frac": 0.09737029671669006,
+        "overloaded_host_step_frac": 0.3547197640117994,
+        "migrations": 47,
+        "rejected": 0,
+        "mean_active_hosts": 14.125,
+        "decisions": 368,
+        "overload": 17858.001953125
+      },
+      "DQN_noK": {
+        "energy_kwh": 69.82046508789062,
+        "sla_overload_frac": 0.11890091747045517,
+        "overloaded_host_step_frac": 0.410828025477707,
+        "migrations": 29,
+        "rejected": 0,
+        "mean_active_hosts": 14.17361111111111,
+        "decisions": 350,
+        "overload": 21806.77734375
+      }
+    },
+    {
+      "FirstFit": {
+        "energy_kwh": 65.9000015258789,
+        "sla_overload_frac": 0.15358737111091614,
+        "overloaded_host_step_frac": 0.45081332300542215,
+        "migrations": 2,
+        "rejected": 0,
+        "mean_active_hosts": 13.447916666666666,
+        "decisions": 320,
+        "overload": 26821.443359375
+      },
+      "BestFit": {
+        "energy_kwh": 65.75942993164062,
+        "sla_overload_frac": 0.154288649559021,
+        "overloaded_host_step_frac": 0.4538621047174702,
+        "migrations": 5,
+        "rejected": 0,
+        "mean_active_hosts": 13.395833333333334,
+        "decisions": 323,
+        "overload": 26943.9453125
+      },
+      "DQN": {
+        "energy_kwh": 66.65798950195312,
+        "sla_overload_frac": 0.10096298903226852,
+        "overloaded_host_step_frac": 0.36902927580893685,
+        "migrations": 56,
+        "rejected": 0,
+        "mean_active_hosts": 13.520833333333334,
+        "decisions": 374,
+        "overload": 17631.49609375
+      },
+      "DQN_noK": {
+        "energy_kwh": 66.58301544189453,
+        "sla_overload_frac": 0.10037660598754883,
+        "overloaded_host_step_frac": 0.3758043758043758,
+        "migrations": 49,
+        "rejected": 0,
+        "mean_active_hosts": 13.489583333333334,
+        "decisions": 367,
+        "overload": 17529.076171875
+      }
+    },
+    {
+      "FirstFit": {
+        "energy_kwh": 68.91564178466797,
+        "sla_overload_frac": 0.15974724292755127,
+        "overloaded_host_step_frac": 0.45808531746031744,
+        "migrations": 0,
+        "rejected": 0,
+        "mean_active_hosts": 14.0,
+        "decisions": 322,
+        "overload": 29338.85546875
+      },
+      "BestFit": {
+        "energy_kwh": 68.91539764404297,
+        "sla_overload_frac": 0.15975147485733032,
+        "overloaded_host_step_frac": 0.45808531746031744,
+        "migrations": 0,
+        "rejected": 0,
+        "mean_active_hosts": 14.0,
+        "decisions": 322,
+        "overload": 29339.638671875
+      },
+      "DQN": {
+        "energy_kwh": 69.7794189453125,
+        "sla_overload_frac": 0.12165473401546478,
+        "overloaded_host_step_frac": 0.42404129793510326,
+        "migrations": 25,
+        "rejected": 0,
+        "mean_active_hosts": 14.125,
+        "decisions": 347,
+        "overload": 22342.849609375
+      },
+      "DQN_noK": {
+        "energy_kwh": 69.9273681640625,
+        "sla_overload_frac": 0.10456773638725281,
+        "overloaded_host_step_frac": 0.36160275319567353,
+        "migrations": 42,
+        "rejected": 0,
+        "mean_active_hosts": 14.125,
+        "decisions": 364,
+        "overload": 19204.666015625
+      }
+    }
+  ],
+  "total_seconds": 1390.8677521029967
+}

@@ -190,3 +190,35 @@ def test_run_slo_live(tmp_path):
     assert out_file.is_file()
     assert "slo_target_ms" in res
     assert "conditions" in res
+
+
+def test_run_slo_revert_on_apply_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr("irm.experiment.rotation", lambda reps: [["C"]])
+
+    class DummyProc:
+        pid = 1234
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr("subprocess.Popen", lambda *args, **kwargs: DummyProc())
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("irm.experiment.wait_for_cgroup", lambda pid, unit: f"/user.slice/{unit}.scope")
+    monkeypatch.setattr("irm.experiment.wait_for_port", lambda port, timeout=10.0: None)
+    monkeypatch.setattr("irm.monitor.run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("irm.recommend.recommend", lambda *args, **kwargs: {"items": []})
+    monkeypatch.setattr("time.sleep", lambda *args: None)
+
+    def failing_apply(*args, **kwargs):
+        raise RuntimeError("apply error")
+
+    revert_calls = []
+    monkeypatch.setattr("irm.execute.apply", failing_apply)
+    monkeypatch.setattr("irm.execute.revert", lambda db, root: revert_calls.append((db, root)))
+
+    out_file = tmp_path / "slo.json"
+    with pytest.raises(RuntimeError, match="apply error"):
+        run_slo(out_file, minutes=0.1, reps=1)
+
+    assert len(revert_calls) >= 1
+

@@ -249,3 +249,75 @@ Remaining limitation: cgroups that stopped within `--hours` still get items; `ap
 
 Also added `run_tests.sh` (direct pytest, no jail) and `run_all.sh` (tests, then monitor + dashboard, opens the browser)
 at the user's request.
+
+---
+
+## Two-hour hardening block (2026-09-17, 10:39–12:40)
+
+User request: "Solve all the issues which can be solved in 2 hours." In scope: live SLO experiment, multi-seed placement
+study with a no-K ablation, stale-cgroup recommendations, dashboard result cards, gate checks on the prototype modules,
+eBPF program (after the user installed the toolchain). Out of scope: the Azure trace (hours of download).
+
+### Dispatched in parallel (P6–P9), all accepted
+`denied_actions` none for all four; the full suite **88 passed** (1 live test deselected). Commit `448cf76`.
+
+### Mutation checks (architect)
+| Control removed | Result |
+|---|---|
+| M1 `execute.validate` prefix check | 1 test failed |
+| M2 `apply` dry-run default | 1 test failed |
+| M3 `memory.high` clamp | 1 test failed |
+| M4 dashboard `Host` check | 1 test failed |
+| M5 dashboard metric whitelist | 1 test failed |
+
+Every control is guarded by a test; files restored and verified identical.
+
+### Probe D.8 re-run
+`claude --version` from agy → `denied_actions: command`. The removal of the global `command(claude)` rule is verified.
+
+### Review of `irm/experiment.py` before running it outside the jail
+Loopback-only sockets; argument-list `subprocess` calls (no shell); every scope stopped and applied limits reverted in
+`finally`. Condition C protects the service and limits only the experiment's hogs (`--only`), so no other cgroup can be
+touched, and all limits disappear with the stopped scopes. Known biases, both against `irm`: cpuhog iterations/s in C
+include the 60 s unthrottled warm-up; in B the hog can end ~0.5 s before the load generator.
+
+### Security gate (independent Sonnet reviewer): **FAIL**, fixes dispatched (`.tasks/p10-security-fixes.md`)
+| Severity (reviewer) | Finding | Architect assessment |
+|---|---|---|
+| Critical | `--allow "/"`, `".."`, `"../.."` defeat prefix confinement in `validate()` | Needs the operator to pass it, and user-owned writes still cannot touch root-owned cgroups, but it breaks the T9 invariant. Fix: entries must start with `/`, have no `..`, and resolve strictly inside root |
+| High | `run_slo` skips `revert` if `apply()` raises (tracking set after the call) | Real impact low: targets are the experiment's own scopes, removed when stopped. Fix: set tracking before `apply()` |
+| Medium | `str.isdigit()` accepts `²`/`٥٠٠`; `²` crashes `int()` | Fix: ASCII `re.fullmatch` |
+| Low | `cgroup.controllers` as a directory passes | Fix: `is_file()` |
+
+Dashboard passed every probe (Host spoofing, traversal, SQL-shaped parameters, non-GET, DOM sinks, headers).
+
+### Security fixes (P10) accepted
+agy: `denied_actions` none, 4 tests added, `23 passed`. Mutation checks: allow sanitization removed, revert tracking moved
+after `apply`, ASCII digit check reverted to `isdigit`, `is_file` → `exists` — **each makes exactly one test fail**.
+
+### Placement study (5 seeds, util ×1.4, host slack ×2; 1,391 s in the jail)
+| Policy | SLA overload | Overloaded host-steps | Energy kWh | Migrations | Active hosts |
+|---|---|---|---|---|---|
+| FirstFit | 15.66% ± 0.38 | 45.7% ± 0.8 | 68.3 ± 1.3 | 2.2 ± 3.4 | 13.9 |
+| BestFit | 15.73% ± 0.31 | 45.8% ± 0.7 | 68.3 ± 1.3 | 2.8 ± 3.6 | 13.9 |
+| DQN | **10.60% ± 0.82** | **36.8% ± 3.3** | 69.2 ± 1.4 | 47 ± 12 | 14.0 |
+| DQN_noK | 10.45% ± 0.88 | 37.0% ± 2.4 | 69.4 ± 1.5 | 50 ± 14 | 14.1 |
+
+(± = 95% CI over seeds.) **Findings:** the DQN cuts SLA overload by about a third versus FirstFit/BestFit with
+non-overlapping intervals, at +1.4% energy and ~45 more migrations per day. **The co-location coefficient K makes no
+measurable difference** (DQN vs DQN_noK within noise): the gain comes from the forecast and utilization features. This
+contradicts the proposal's emphasis on K for this simulator and is reported as such. FirstFit and BestFit remain
+near-identical.
+
+### eBPF program and loader (task 2b) built; code reviewed
+The user installed the toolchain with `pkexec dnf install …` (clang 22.1.8, bpftool 7.6.0, libbpf-devel 1.6.3).
+agy: `denied_actions` none; `irm-test bpf` builds with `-Wall -Wextra` and no warnings. Architect review of
+`bpf/attrib.bpf.c` (136 lines): five maps as TRD §5.2; the `cgroup_skb/ingress` program has a single `return 1`; no loops;
+vector index bounded. `bpf/attrib.c` (296 lines): only `open("/sys/fs/cgroup", O_RDONLY|O_DIRECTORY)`; no file writes;
+`strtol` validation of `--interval`; skeleton destroyed on SIGINT/SIGTERM; the blamed aggregation table (32,768 slots)
+is twice the BPF map's 16,384 entries, so linear probing always terminates. Live load pending (needs root).
+
+### Orchestration mistake (architect)
+Two background chains waited with `pgrep -f "<pattern>"` where the pattern appeared in the chain's own command line, so
+they matched themselves and would have waited forever. Caught at 11:19 and killed; the experiment start slipped ~5 min.
+Rule: use the `[x]yz` bracket trick in `pgrep -f` patterns inside the same shell.

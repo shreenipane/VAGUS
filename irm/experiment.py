@@ -636,9 +636,9 @@ def run_slo(
                                 min_cores=0.0,
                             )
                             from irm.execute import apply
-                            apply(tmp_db, recs, "/sys/fs/cgroup", allow=[], yes=True)
                             cond_apply_ran = True
                             last_applied_db = tmp_db
+                            apply(tmp_db, recs, "/sys/fs/cgroup", allow=[], yes=True)
                             if not applied_plan:
                                 applied_plan = recs.get("items", [])
                             lg_proc, lg_unit, lg_cg = start_role(
