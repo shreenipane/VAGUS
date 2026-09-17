@@ -1,11 +1,16 @@
 import asyncio
+import json
+from pathlib import Path
+import subprocess
 import threading
+import time
 import numpy as np
 import pytest
 
 from irm.cli import main
 from irm.experiment import (
     calibrate_iters,
+    main as exp_main,
     parse_cgroup,
     percentiles,
     rotation,
@@ -221,4 +226,68 @@ def test_run_slo_revert_on_apply_failure(monkeypatch, tmp_path):
         run_slo(out_file, minutes=0.1, reps=1)
 
     assert len(revert_calls) >= 1
+
+
+def test_cpuhog_delay(tmp_path):
+    out_file = tmp_path / "cpu_delay.json"
+    t0 = time.monotonic()
+    rc = exp_main(["cpuhog", "--delay", "0.2", "--seconds", "0.5", "--procs", "1", "--out", str(out_file)])
+    elapsed = time.monotonic() - t0
+    assert rc == 0
+    assert elapsed >= 0.7
+    assert out_file.is_file()
+    data = json.loads(out_file.read_text(encoding="utf-8"))
+    assert data["iters_per_s"] > 0.0
+
+
+def test_cleanup_resets_failed_units(monkeypatch, tmp_path):
+    monkeypatch.setattr("irm.experiment.rotation", lambda reps: [["B", "C"]])
+
+    class DummyProc:
+        pid = 1234
+
+        def wait(self, timeout=None):
+            return 0
+
+    subprocess_calls = []
+
+    def fake_run(cmd, *args, **kwargs):
+        subprocess_calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("irm.experiment.wait_for_cgroup", lambda pid, unit: f"/user.slice/{unit}.scope")
+    monkeypatch.setattr("irm.experiment.wait_for_port", lambda port, timeout=10.0: None)
+    monkeypatch.setattr("irm.monitor.run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("irm.recommend.recommend", lambda *args, **kwargs: {"items": []})
+    monkeypatch.setattr("irm.execute.apply", lambda *args, **kwargs: None)
+    monkeypatch.setattr("irm.execute.revert", lambda *args, **kwargs: None)
+    monkeypatch.setattr("time.sleep", lambda *args: None)
+
+    def fake_popen(cmd, *args, **kwargs):
+        if "loadgen" in cmd:
+            out_idx = cmd.index("--out") + 1
+            Path(cmd[out_idx]).write_text(json.dumps({"records": [[0.1, 10.0]], "errors": 0}))
+        elif "cpuhog" in cmd:
+            out_idx = cmd.index("--out") + 1
+            Path(cmd[out_idx]).write_text(json.dumps({"iters_per_s": 5000.0}))
+        return DummyProc()
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+
+    out_file = tmp_path / "slo.json"
+    res = run_slo(out_file, minutes=0.1, reps=1, rate=20)
+
+    assert res["conditions"]["C"]["cpuhog_ips"] == pytest.approx(5000.0)
+
+    stop_units = [cmd[3] for cmd in subprocess_calls if cmd[:3] == ["systemctl", "--user", "stop"]]
+    reset_units = [cmd[3] for cmd in subprocess_calls if cmd[:3] == ["systemctl", "--user", "reset-failed"]]
+
+    assert len(stop_units) > 0
+    assert len(reset_units) > 0
+    assert set(stop_units) == set(reset_units)
+    for i, cmd in enumerate(subprocess_calls[:-1]):
+        if cmd[:3] == ["systemctl", "--user", "stop"]:
+            assert subprocess_calls[i + 1] == ["systemctl", "--user", "reset-failed", cmd[3]]
+
 

@@ -320,7 +320,24 @@ async def run_loadgen(
     return {"records": records, "errors": errors}
 
 
-def _cpu_worker(idx: int, counts, seconds: float, stop_event):
+def _cpu_worker(
+    idx: int,
+    counts,
+    seconds: float,
+    delay: float,
+    start_flag: str | None,
+    stop_event,
+):
+    if start_flag:
+        while not stop_event.is_set() and not os.path.exists(start_flag):
+            for _ in range(10000):
+                pass
+    elif delay > 0:
+        t_delay_end = time.monotonic() + delay
+        while not stop_event.is_set() and time.monotonic() < t_delay_end:
+            for _ in range(10000):
+                pass
+
     t_end = time.monotonic() + seconds
     local_count = 0
     while not stop_event.is_set() and time.monotonic() < t_end:
@@ -330,15 +347,22 @@ def _cpu_worker(idx: int, counts, seconds: float, stop_event):
     counts[idx] = local_count
 
 
-def run_cpuhog(procs: int, seconds: float, out: str | Path) -> dict:
+def run_cpuhog(
+    procs: int,
+    seconds: float,
+    out: str | Path,
+    delay: float = 0.0,
+    start_flag: str | Path | None = None,
+) -> dict:
     """CPU hog role: N multiprocessing busy-loop workers counting iterations."""
     counts = multiprocessing.RawArray("q", procs)
     stop_event = multiprocessing.Event()
+    flag_str = str(start_flag) if start_flag else None
     workers = []
     for i in range(procs):
         p = multiprocessing.Process(
             target=_cpu_worker,
-            args=(i, counts, seconds, stop_event),
+            args=(i, counts, seconds, delay, flag_str, stop_event),
             daemon=True,
         )
         workers.append(p)
@@ -352,9 +376,10 @@ def run_cpuhog(procs: int, seconds: float, out: str | Path) -> dict:
     old_sigterm = signal.signal(signal.SIGTERM, handle_signal)
     old_sigint = signal.signal(signal.SIGINT, handle_signal)
 
+    join_timeout = (delay + seconds + 120.0) if flag_str else max(0.1, delay + seconds + 5.0)
     try:
         for p in workers:
-            p.join(timeout=max(0.1, seconds + 5.0))
+            p.join(timeout=join_timeout)
     finally:
         stop_event.set()
         for p in workers:
@@ -571,14 +596,19 @@ def run_slo(
                             srv_proc, srv_unit, srv_cg = start_role("service", ["--port", str(port)])
                             wait_for_port(port, timeout=10.0)
                             procs_count = os.cpu_count() or 1
-                            cpu_seconds = 10.0 + seconds
+                            delay = 10.0
                             cpu_proc, cpu_unit, cpu_cg = start_role(
                                 "cpuhog",
-                                ["--procs", str(procs_count), "--seconds", str(cpu_seconds), "--out", str(cpuhog_out)],
+                                [
+                                    "--procs", str(procs_count),
+                                    "--delay", str(delay),
+                                    "--seconds", str(seconds),
+                                    "--out", str(cpuhog_out),
+                                ],
                             )
                             net_proc, net_unit, net_cg = start_role(
                                 "nethog",
-                                ["--seconds", str(cpu_seconds + 5.0)],
+                                ["--seconds", str(delay + seconds + 5.0)],
                             )
                             time.sleep(10.0)
                             lg_proc, lg_unit, lg_cg = start_role(
@@ -593,7 +623,7 @@ def run_slo(
                             )
                             lg_proc.wait()
                             try:
-                                cpu_proc.wait(timeout=5.0)
+                                cpu_proc.wait(timeout=delay + seconds + 15.0)
                             except subprocess.TimeoutExpired:
                                 pass
                             with open(loadgen_out, "r", encoding="utf-8") as f:
@@ -614,14 +644,20 @@ def run_slo(
                             srv_proc, srv_unit, srv_cg = start_role("service", ["--port", str(port)])
                             wait_for_port(port, timeout=10.0)
                             procs_count = os.cpu_count() or 1
-                            cpu_seconds = 65.0 + seconds
+                            delay = 60.0
+                            cpuhog_flag = tmp_dir / f"cpuhog_start_{rep_idx}_{cond}.flag"
                             cpu_proc, cpu_unit, cpu_cg = start_role(
                                 "cpuhog",
-                                ["--procs", str(procs_count), "--seconds", str(cpu_seconds), "--out", str(cpuhog_out)],
+                                [
+                                    "--procs", str(procs_count),
+                                    "--seconds", str(seconds),
+                                    "--start-flag", str(cpuhog_flag),
+                                    "--out", str(cpuhog_out),
+                                ],
                             )
                             net_proc, net_unit, net_cg = start_role(
                                 "nethog",
-                                ["--seconds", str(cpu_seconds + 5.0)],
+                                ["--seconds", str(delay + seconds + 10.0)],
                             )
                             from irm.monitor import run as monitor_run
                             monitor_run(tmp_db, "/sys/fs/cgroup", "/proc", interval=1.0, retention_hours=1.0, duration=60.0)
@@ -641,6 +677,11 @@ def run_slo(
                             apply(tmp_db, recs, "/sys/fs/cgroup", allow=[], yes=True)
                             if not applied_plan:
                                 applied_plan = recs.get("items", [])
+                            # why: starting cpuhog counting via a flag file touched right before loadgen starts
+                            # is simpler and exact compared to measuring monitor+recommend+apply elapsed time
+                            # and passing it, because cpuhog must run during monitoring (for IRM to observe it)
+                            # so its delay cannot be known in advance when spawning the process.
+                            cpuhog_flag.touch()
                             lg_proc, lg_unit, lg_cg = start_role(
                                 "loadgen",
                                 [
@@ -653,7 +694,7 @@ def run_slo(
                             )
                             lg_proc.wait()
                             try:
-                                cpu_proc.wait(timeout=5.0)
+                                cpu_proc.wait(timeout=delay + seconds + 15.0)
                             except subprocess.TimeoutExpired:
                                 pass
                             with open(loadgen_out, "r", encoding="utf-8") as f:
@@ -683,6 +724,15 @@ def run_slo(
                                 )
                             except Exception:
                                 pass
+                            try:
+                                subprocess.run(
+                                    ["systemctl", "--user", "reset-failed", f"{u}.scope"],
+                                    check=False,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                )
+                            except Exception:
+                                pass
                         if cond_apply_ran:
                             try:
                                 from irm.execute import revert
@@ -695,6 +745,15 @@ def run_slo(
             try:
                 subprocess.run(
                     ["systemctl", "--user", "stop", f"{u}.scope"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+            try:
+                subprocess.run(
+                    ["systemctl", "--user", "reset-failed", f"{u}.scope"],
                     check=False,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -751,7 +810,9 @@ def main(argv: list[str] | None = None) -> int:
 
     cpuhog_p = subparsers.add_parser("cpuhog")
     cpuhog_p.add_argument("--procs", type=int, default=os.cpu_count() or 1)
+    cpuhog_p.add_argument("--delay", type=float, default=0.0)
     cpuhog_p.add_argument("--seconds", type=float, required=True)
+    cpuhog_p.add_argument("--start-flag", "--flag", dest="start_flag", type=str, default=None)
     cpuhog_p.add_argument("--out", type=str, required=True)
 
     nethog_p = subparsers.add_parser("nethog")
@@ -767,7 +828,13 @@ def main(argv: list[str] | None = None) -> int:
         out_p.parent.mkdir(parents=True, exist_ok=True)
         out_p.write_text(json.dumps(res, indent=2), encoding="utf-8")
     elif args.role == "cpuhog":
-        run_cpuhog(args.procs, args.seconds, args.out)
+        run_cpuhog(
+            args.procs,
+            args.seconds,
+            args.out,
+            delay=args.delay,
+            start_flag=args.start_flag,
+        )
     elif args.role == "nethog":
         run_nethog(args.seconds)
 
