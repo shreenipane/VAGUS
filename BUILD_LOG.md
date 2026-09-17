@@ -8,6 +8,7 @@ Nothing is marked done without a runnable check.
 - [Operating rules](#operating-rules)
 - [Status](#status)
 - [Phase D — documentation and containment](#phase-d--documentation-and-containment)
+- [Phase 0 — scaffold](#phase-0--scaffold)
 
 ## Operating rules
 
@@ -29,7 +30,9 @@ Nothing is marked done without a runnable check.
 | Phase | State |
 |---|---|
 | D — documentation and containment | **Done** — containment verified (D.5–D.7) |
-| 0–13 | Not started |
+| 0 — scaffold | **Done** |
+| 1 — monitor | Dispatched |
+| 2–13 | Not started |
 
 ---
 
@@ -137,3 +140,19 @@ without `--sandbox`; the jail is the command boundary. No probe created a file o
 The jail probe moved to `.tasks/test_jail_probe.py` and runs at every gate.
 
 **Standing rule:** never start agy with the repository as its working directory.
+
+---
+
+## Phase 0 — scaffold
+
+**Spec:** `.tasks/00-scaffold.md`. **Dispatch:** from `agy-ws`, no `--sandbox`; exit 0, `denied_actions` none.
+
+| Check | Result |
+|---|---|
+| Files changed | `irm/__init__.py`, `irm/__main__.py`, `irm/cli.py`, `tests/conftest.py`, `tests/test_cli.py`: exactly the spec |
+| Agent's `IRM-TEST` | `3 passed in 0.02s` (first task in which the agent ran its own tests) |
+| Architect `irm-test -q` | `3 passed` |
+| Outside the jail | `irm --version` → `irm 0.1.0`; no arguments → help, exit 2 |
+| Ponytail | 4 + 5 + 15 lines; nothing unrequested |
+
+**Accepted.**
