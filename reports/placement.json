@@ -1,0 +1,41 @@
+{
+  "FirstFit": {
+    "energy_kwh": 60.64289474487305,
+    "sla_overload_frac": 0.02014137990772724,
+    "overloaded_host_step_frac": 0.2003968253968254,
+    "migrations": 0,
+    "rejected": 0,
+    "mean_active_hosts": 14.0,
+    "decisions": 320,
+    "overload": 2698.87158203125
+  },
+  "BestFit": {
+    "energy_kwh": 60.64289474487305,
+    "sla_overload_frac": 0.02014137990772724,
+    "overloaded_host_step_frac": 0.2003968253968254,
+    "migrations": 0,
+    "rejected": 0,
+    "mean_active_hosts": 14.0,
+    "decisions": 320,
+    "overload": 2698.87158203125
+  },
+  "DQN": {
+    "energy_kwh": 60.72628402709961,
+    "sla_overload_frac": 0.017495108768343925,
+    "overloaded_host_step_frac": 0.18208807521029194,
+    "migrations": 3,
+    "rejected": 0,
+    "mean_active_hosts": 14.034722222222221,
+    "decisions": 323,
+    "overload": 2344.2861328125
+  },
+  "n_hosts": 19,
+  "t0": 172800,
+  "t1": 258900,
+  "weights": [
+    10.0,
+    1.0,
+    0.1
+  ],
+  "train_seconds": 348.88525656599813
+}
