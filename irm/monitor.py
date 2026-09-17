@@ -10,6 +10,7 @@ from irm.attrib import Reader, cgroup_ids
 COLUMNS: tuple[str, ...] = (
     "cpu_cores", "throttled_ratio", "mem_bytes", "io_rbps", "io_wbps", "cpu_psi", "mem_psi",
     "io_psi", "pids", "softirq_cores", "netrx_attrib_cores", "netrx_blamed_cores", "netrx_unattrib_cores",
+    "irq_psi",
 )
 
 SCHEMA = (
@@ -17,6 +18,7 @@ SCHEMA = (
     "cpu_cores real, throttled_ratio real, mem_bytes real, io_rbps real, io_wbps real, "
     "cpu_psi real, mem_psi real, io_psi real, pids real, softirq_cores real, "
     "netrx_attrib_cores real, netrx_blamed_cores real, netrx_unattrib_cores real, "
+    "irq_psi real, "
     "primary key (cgroup, ts)) without rowid;\ncreate index if not exists samples_ts on samples(ts);"
 )
 
@@ -65,9 +67,9 @@ def _parse_io_stat(text: str | None) -> tuple[int | None, int | None]:
     return rbytes, wbytes
 
 
-def _parse_pressure(text: str | None) -> float | None:
+def _parse_pressure(text: str | None, prefix: str = "some ") -> float | None:
     for line in (text or "").splitlines():
-        if line.startswith("some "):
+        if line.startswith(prefix):
             for token in line.split():
                 if token.startswith("avg10="):
                     try:
@@ -90,7 +92,10 @@ def discover(root: str | Path) -> list[str]:
 
 def read_cgroup(root: str | Path, name: str) -> dict | None:
     cg_dir = os.path.join(str(root), name.lstrip("/"))
-    files = ("cpu.stat", "memory.current", "io.stat", "cpu.pressure", "memory.pressure", "io.pressure", "pids.current")
+    files = (
+        "cpu.stat", "memory.current", "io.stat", "cpu.pressure", "memory.pressure", "io.pressure",
+        "pids.current", "irq.pressure",
+    )
     txts = [_read(os.path.join(cg_dir, f)) for f in files]
 
     # Single isdir check only if a read failed, to detect vanished cgroup.
@@ -105,6 +110,7 @@ def read_cgroup(root: str | Path, name: str) -> dict | None:
         "rbytes": rbytes, "wbytes": wbytes,
         "cpu_psi": _parse_pressure(txts[3]), "mem_psi": _parse_pressure(txts[4]),
         "io_psi": _parse_pressure(txts[5]), "pids": _to_int(txts[6]),
+        "irq_psi": _parse_pressure(txts[7], prefix="full "),
     }
 
 
@@ -131,6 +137,7 @@ def read_host(proc: str | Path) -> dict:
         "cpu_psi": _parse_pressure(_read(os.path.join(proc_str, "pressure", "cpu"))),
         "mem_psi": _parse_pressure(_read(os.path.join(proc_str, "pressure", "memory"))),
         "io_psi": _parse_pressure(_read(os.path.join(proc_str, "pressure", "io"))),
+        "irq_psi": _parse_pressure(_read(os.path.join(proc_str, "pressure", "irq")), prefix="full "),
     }
 
 
@@ -156,6 +163,7 @@ def leaf_gauges(prev: dict | None, cur: dict, dt: float | None) -> dict:
     res["io_rbps"] = _rate(p.get("rbytes"), cur.get("rbytes"), dt)
     res["io_wbps"] = _rate(p.get("wbytes"), cur.get("wbytes"), dt)
     res["cpu_psi"], res["mem_psi"], res["io_psi"] = cur.get("cpu_psi"), cur.get("mem_psi"), cur.get("io_psi")
+    res["irq_psi"] = cur.get("irq_psi")
     res["pids"] = cur.get("pids")
     return res
 
@@ -167,6 +175,7 @@ def host_gauges(prev: dict | None, cur: dict, dt: float | None, tck: float) -> d
     res["softirq_cores"] = _rate(p.get("softirq_ticks"), cur.get("softirq_ticks"), dt, tck)
     res["mem_bytes"] = cur.get("mem")
     res["cpu_psi"], res["mem_psi"], res["io_psi"] = cur.get("cpu_psi"), cur.get("mem_psi"), cur.get("io_psi")
+    res["irq_psi"] = cur.get("irq_psi")
     return res
 
 
@@ -220,6 +229,9 @@ def open_db(path: str | Path) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
     conn.executescript("pragma journal_mode=wal;\n" + SCHEMA)
+    cols = [row[1] for row in conn.execute("pragma table_info(samples)").fetchall()]
+    if "irq_psi" not in cols:
+        conn.execute("alter table samples add column irq_psi real")
     return conn
 
 

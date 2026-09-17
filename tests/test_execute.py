@@ -4,7 +4,9 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+import time
 import types
+from datetime import datetime, timezone
 import pytest
 from irm.cli import main
 from irm.execute import apply, revert, validate
@@ -74,6 +76,7 @@ def test_dry_run_writes_nothing(fake_tree, tmp_path):
     orig_mem = (app_dir / "memory.high").read_bytes()
 
     recs = {
+        "generated_at": time.time(),
         "items": [{
             "cgroup": cg,
             "cpu_max": "50000 100000",
@@ -106,6 +109,7 @@ def test_apply_and_revert_restores_exact_bytes(fake_tree, tmp_path):
     (app_dir / "memory.high").write_bytes(orig_mem_bytes)
 
     recs = {
+        "generated_at": time.time(),
         "items": [{
             "cgroup": cg,
             "cpu_max": "200000 100000",
@@ -145,6 +149,7 @@ def test_memory_clamp(fake_tree, tmp_path):
     # 100,000,000 * 1.1 = 110,000,000
     # ceil_MiB(110,000,000) = 110,100,480 bytes (105 MiB)
     recs = {
+        "generated_at": time.time(),
         "items": [{
             "cgroup": cg,
             "cpu_max": "max 100000",
@@ -168,6 +173,7 @@ def test_execute_cli(fake_tree, tmp_path, capsys):
     cg = "/user.slice/user-1000.slice/user@1000.service/app.slice"
 
     recs = {
+        "generated_at": time.time(),
         "items": [{
             "cgroup": cg,
             "cpu_max": "300000 100000",
@@ -175,6 +181,7 @@ def test_execute_cli(fake_tree, tmp_path, capsys):
             "cpu_weight": None,
         }]
     }
+
     recs_file = tmp_path / "recs.json"
     recs_file.write_text(json.dumps(recs), encoding="utf-8")
 
@@ -274,5 +281,171 @@ def test_validate_controllers_as_directory(tmp_path, monkeypatch):
     err = validate(root, cg, "cpu.max", "max 100000")
     assert err is not None
     assert "cgroup.controllers does not exist" in err
+
+
+def test_apply_stale_plan(fake_tree, tmp_path):
+    root, app_dir = fake_tree
+    db_path = tmp_path / "stale.db"
+    cg = "/user.slice/user-1000.slice/user@1000.service/app.slice"
+    target_file = app_dir / "cpu.max"
+    orig_cpu = target_file.read_text(encoding="utf-8")
+
+    now = 1000000.0
+
+    # 1. 20 min old -> return 1, no file written, no journal rows
+    recs_20m = {
+        "generated_at": now - 20 * 60,
+        "items": [{
+            "cgroup": cg,
+            "cpu_max": "300000 100000",
+            "memory_high": None,
+            "cpu_weight": None,
+        }],
+    }
+    code = apply(db_path, recs_20m, root, yes=True, now=now, max_age_minutes=15.0)
+    assert code == 1
+    assert target_file.read_text(encoding="utf-8") == orig_cpu
+    if db_path.is_file():
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.cursor()
+            cur.execute("select count(*) from sqlite_master where type='table' and name='journal'")
+            assert cur.fetchone()[0] == 0
+
+    # 2. missing generated_at -> refused (return 1, no file written)
+    recs_missing = {
+        "items": [{
+            "cgroup": cg,
+            "cpu_max": "300000 100000",
+            "memory_high": None,
+            "cpu_weight": None,
+        }],
+    }
+    code = apply(db_path, recs_missing, root, yes=True, now=now, max_age_minutes=15.0)
+    assert code == 1
+    assert target_file.read_text(encoding="utf-8") == orig_cpu
+
+    # 3. 1 min old -> applies
+    recs_1m = {
+        "generated_at": now - 60,
+        "items": [{
+            "cgroup": cg,
+            "cpu_max": "300000 100000",
+            "memory_high": None,
+            "cpu_weight": None,
+        }],
+    }
+    code = apply(db_path, recs_1m, root, yes=True, now=now, max_age_minutes=15.0)
+    assert code == 0
+    assert target_file.read_text(encoding="utf-8").strip() == "300000 100000"
+
+    # 4. max_age_minutes=None -> applies even if 20m old
+    recs_old = {
+        "generated_at": now - 3600,
+        "items": [{
+            "cgroup": cg,
+            "cpu_max": "400000 100000",
+            "memory_high": None,
+            "cpu_weight": None,
+        }],
+    }
+    code = apply(db_path, recs_old, root, yes=True, now=now, max_age_minutes=None)
+    assert code == 0
+    assert target_file.read_text(encoding="utf-8").strip() == "400000 100000"
+
+    # 5. ISO-8601 string support
+    iso_str = datetime.fromtimestamp(now - 60, tz=timezone.utc).isoformat()
+    recs_iso = {
+        "generated_at": iso_str,
+        "items": [{
+            "cgroup": cg,
+            "cpu_max": "500000 100000",
+            "memory_high": None,
+            "cpu_weight": None,
+        }],
+    }
+    code = apply(db_path, recs_iso, root, yes=True, now=now, max_age_minutes=15.0)
+    assert code == 0
+    assert target_file.read_text(encoding="utf-8").strip() == "500000 100000"
+
+
+def test_revert_skips_when_value_changed(fake_tree, tmp_path, capsys):
+    root, app_dir = fake_tree
+    db_path = tmp_path / "revert_change.db"
+    cg = "/user.slice/user-1000.slice/user@1000.service/app.slice"
+    target_file = app_dir / "cpu.max"
+    orig_val = "100000 100000\n"
+    target_file.write_text(orig_val, encoding="utf-8")
+
+    now = time.time()
+    recs = {
+        "generated_at": now,
+        "items": [{
+            "cgroup": cg,
+            "cpu_max": "200000 100000",
+            "memory_high": None,
+            "cpu_weight": None,
+        }],
+    }
+    # Apply
+    assert apply(db_path, recs, root, yes=True) == 0
+    assert target_file.read_text(encoding="utf-8").strip() == "200000 100000"
+
+    # Change file by hand
+    target_file.write_text("700000 100000\n", encoding="utf-8")
+
+    # Revert without force
+    code = revert(db_path, root, force=False)
+    assert code == 1
+    # Value kept
+    assert target_file.read_text(encoding="utf-8").strip() == "700000 100000"
+    # Status in journal is revert_skipped:changed
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute("select status from journal where cgroup = ? and file = 'cpu.max'", (cg,)).fetchone()
+        assert row is not None
+        assert row[0] == "revert_skipped:changed"
+
+    captured = capsys.readouterr()
+    assert f"skipping {cg} cpu.max: current value 700000 100000 differs from applied 200000 100000 (use --force)" in captured.out
+
+    # Revert with force=True restores
+    code_force = revert(db_path, root, force=True)
+    assert code_force == 0
+    assert target_file.read_text(encoding="utf-8") == orig_val
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute("select status from journal where cgroup = ? and file = 'cpu.max'", (cg,)).fetchone()
+        assert row[0] == "reverted"
+
+
+def test_revert_normalization_cpu_max(fake_tree, tmp_path):
+    root, app_dir = fake_tree
+    db_path = tmp_path / "norm.db"
+    cg = "/user.slice/user-1000.slice/user@1000.service/app.slice"
+    target_file = app_dir / "cpu.max"
+    orig_val = "50000 100000\n"
+    target_file.write_text(orig_val, encoding="utf-8")
+
+    now = time.time()
+    recs = {
+        "generated_at": now,
+        "items": [{
+            "cgroup": cg,
+            "cpu_max": "max",
+            "memory_high": None,
+            "cpu_weight": None,
+        }],
+    }
+    # Apply "max"
+    assert apply(db_path, recs, root, yes=True) == 0
+
+    # Kernel returns "max 100000\n" when reading cpu.max
+    target_file.write_text("max 100000\n", encoding="utf-8")
+
+    # Revert should recognize "max 100000" == "max" through normalization and restore
+    code = revert(db_path, root, force=False)
+    assert code == 0
+    assert target_file.read_text(encoding="utf-8") == orig_val
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute("select status from journal where cgroup = ? and file = 'cpu.max'", (cg,)).fetchone()
+        assert row[0] == "reverted"
 
 

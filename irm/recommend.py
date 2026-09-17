@@ -150,11 +150,11 @@ def recommend(
             "cgroup": cg,
             "source": "empirical",
             "peak_cores": round(peak, 4),
-            "cpu_max": "max",
-            "memory_high": "max",
+            "cpu_max": None,
+            "memory_high": None,
             "cpu_weight": 1000,
             "old": _read_old(root, cg),
-            "reason": f"protected; peak {peak:.2f} cores (empirical)",
+            "reason": f"protected; peak {peak:.2f} cores (empirical); CPU weight raised, existing limits kept",
         })
 
     for cg in other_cgs:

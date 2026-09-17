@@ -1,3 +1,4 @@
+from datetime import datetime
 import errno
 import math
 import os
@@ -92,13 +93,55 @@ def validate(
     return None
 
 
+def _fmt_minutes(m: float) -> str:
+    if abs(m - round(m)) < 1e-6:
+        return str(int(round(m)))
+    return f"{m:.1f}"
+
+
+def _normalize_val(file: str, val: str | None) -> str | None:
+    if val is None:
+        return None
+    s = val.strip()
+    if file == "cpu.max" and s == "max":
+        return "max 100000"
+    return s
+
+
 def apply(
     db_path: str | Path,
     recs: dict,
     root: str | Path,
     allow: list[str] | set[str] | tuple[str, ...] | None = None,
     yes: bool = False,
+    max_age_minutes: float | None = 15.0,
+    now: float | None = None,
 ) -> int:
+    if max_age_minutes is not None:
+        raw_gen = recs.get("generated_at")
+        gen_ts: float | None = None
+        if raw_gen is not None:
+            if isinstance(raw_gen, (int, float)) and not isinstance(raw_gen, bool):
+                gen_ts = float(raw_gen)
+            elif isinstance(raw_gen, str):
+                try:
+                    gen_ts = datetime.fromisoformat(raw_gen).timestamp()
+                except (ValueError, TypeError):
+                    gen_ts = None
+        if gen_ts is None:
+            print("refusing stale plan: no generated_at; regenerate with irm recommend")
+            return 1
+        now_ts = time.time() if now is None else float(now)
+        age_minutes = (now_ts - gen_ts) / 60.0
+        if age_minutes > max_age_minutes:
+            age_disp = _fmt_minutes(age_minutes)
+            lim_disp = _fmt_minutes(max_age_minutes)
+            print(
+                f"refusing stale plan: generated {age_disp} min ago "
+                f"(limit {lim_disp}); regenerate with irm recommend"
+            )
+            return 1
+
     has_error = False
     planned_ops = []
     root_path = Path(root)
@@ -208,6 +251,7 @@ def revert(
     db_path: str | Path,
     root: str | Path,
     batch: int | None = None,
+    force: bool = False,
 ) -> int:
     if not Path(db_path).is_file():
         return 0
@@ -220,7 +264,7 @@ def revert(
             return 0
 
         if batch is None:
-            cur.execute("select max(batch) from journal where status = 'applied'")
+            cur.execute("select max(batch) from journal where status in ('applied', 'revert_skipped:changed')")
             row = cur.fetchone()
             if not row or row[0] is None:
                 return 0
@@ -228,7 +272,7 @@ def revert(
 
         cur.execute(
             "select id, cgroup, file, old, new from journal "
-            "where batch = ? and status = 'applied' order by id desc",
+            "where batch = ? and status in ('applied', 'revert_skipped:changed') order by id desc",
             (batch,),
         )
         rows = cur.fetchall()
@@ -239,11 +283,36 @@ def revert(
                 print(f"Skipping revert of {cg} {file}: old value is NULL")
                 continue
 
+            target_file = root_path / cg.lstrip("/") / file
+            cur_val: str | None = None
+            if target_file.is_file():
+                try:
+                    cur_val = target_file.read_text(encoding="utf-8")
+                except OSError:
+                    cur_val = None
+
+            cur_norm = _normalize_val(file, cur_val)
+            new_norm = _normalize_val(file, new)
+
+            if cur_norm != new_norm and not force:
+                cur_disp = cur_val.strip() if cur_val is not None else "null"
+                new_disp = new.strip()
+                print(
+                    f"skipping {cg} {file}: current value {cur_disp} "
+                    f"differs from applied {new_disp} (use --force)"
+                )
+                cur.execute(
+                    "update journal set status = ? where id = ?",
+                    ("revert_skipped:changed", row_id),
+                )
+                conn.commit()
+                has_error = True
+                continue
+
             old_disp = old.strip()
             new_disp = new.strip()
             print(f"{cg}  {file}  {new_disp} → {old_disp}")
 
-            target_file = root_path / cg.lstrip("/") / file
             try:
                 target_file.write_text(old, encoding="utf-8")
                 status = "reverted"
@@ -256,3 +325,4 @@ def revert(
             conn.commit()
 
     return 1 if has_error else 0
+

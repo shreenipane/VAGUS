@@ -87,14 +87,15 @@ def test_recommend_proportional_squeeze_and_memory(tmp_path, monkeypatch):
     items = {it["cgroup"]: it for it in recs["items"]}
     assert set(items.keys()) == {cg_p, cg_o1, cg_o2}
 
-    # Protected gets max/1000/max
+    # Protected keeps existing limits: cpu_max and memory_high are None, cpu_weight is 1000
     p_item = items[cg_p]
-    assert p_item["cpu_max"] == "max"
+    assert p_item["cpu_max"] is None
     assert p_item["cpu_weight"] == 1000
-    assert p_item["memory_high"] == "max"
+    assert p_item["memory_high"] is None
     assert p_item["old"]["cpu.max"] == "max 100000"
     assert p_item["old"]["memory.high"] == "max"
     assert p_item["old"]["cpu.weight"] is None
+    assert p_item["reason"] == "protected; peak 2.00 cores (empirical); CPU weight raised, existing limits kept"
 
     # Others squeezed so Σ quota ≤ avail
     # ncpu=4, reserve = 2.0 * 1.25 = 2.5
@@ -259,7 +260,10 @@ def test_recommend_idle_leaves_are_background(tmp_path, monkeypatch):
         items[cg_noisy]["reason"]
         == "q95 10.00 cores (empirical) × 1.25; squeezed to fit 9.25 free cores after 6.25 reserved and 0.50 background"
     )
-    assert items[cg_crit]["cpu_max"] == "max"
+    assert items[cg_crit]["cpu_max"] is None
+    assert items[cg_crit]["memory_high"] is None
+    assert items[cg_crit]["cpu_weight"] == 1000
+    assert items[cg_crit]["reason"] == "protected; peak 5.00 cores (empirical); CPU weight raised, existing limits kept"
 
 
 def test_recommend_budget_smaller_than_floors(tmp_path, monkeypatch):
@@ -451,5 +455,51 @@ def test_recommend_skips_gone_cgroups(tmp_path, monkeypatch):
     assert cg_b in skipped
     assert skipped[cg_b] == "gone: cgroup no longer exists"
     assert cg_a not in skipped
+
+
+def test_protected_cgroup_keeps_existing_limits(tmp_path, monkeypatch):
+    monkeypatch.setattr("os.cpu_count", lambda: 4)
+    db_path = tmp_path / "prot.db"
+    create_test_db(db_path)
+    root = tmp_path / "cgroup"
+
+    cg_p = "/user.slice/user-1000.slice/user@1000.service/p.scope"
+    p_dir = root / cg_p.lstrip("/")
+    p_dir.mkdir(parents=True)
+    (p_dir / "cpu.max").write_text("200000 100000\n", encoding="utf-8")
+    (p_dir / "memory.high").write_text("500000000\n", encoding="utf-8")
+
+    now = 1000000
+    t_start = now - 120
+
+    with sqlite3.connect(db_path) as conn:
+        for i in range(24):
+            ts = t_start + i * 5
+            conn.execute(
+                "insert into samples (ts, cgroup, cpu_cores, netrx_attrib_cores, mem_bytes) "
+                "values (?, ?, ?, ?, ?)",
+                (ts, cg_p, 1.5, 0.0, 50 * 1024 * 1024),
+            )
+        conn.commit()
+
+    recs = recommend(
+        db_path=db_path,
+        root=root,
+        protect=[cg_p],
+        min_samples=20,
+        now=now,
+    )
+
+    assert "generated_at" in recs
+    assert recs["generated_at"] == now
+    items = {it["cgroup"]: it for it in recs["items"]}
+    assert cg_p in items
+    p = items[cg_p]
+    assert p["cpu_max"] is None
+    assert p["memory_high"] is None
+    assert p["cpu_weight"] == 1000
+    assert p["old"]["cpu.max"] == "200000 100000"
+    assert p["old"]["memory.high"] == "500000000"
+    assert p["reason"] == "protected; peak 1.50 cores (empirical); CPU weight raised, existing limits kept"
 
 

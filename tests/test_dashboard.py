@@ -391,4 +391,128 @@ def test_dashboard_ui_elements(test_setup):
     assert status == 200
     css = body.decode("utf-8")
     assert ".highlight" in css
+    assert ".warning-text" in css
+    assert ".dimmed" in css
+
+
+def test_malformed_report_file_returns_null(test_setup):
+    client, port, tmp_path = test_setup
+    reports_dir = tmp_path / "reports"
+    # Write a malformed JSON file
+    (reports_dir / "slo.json").write_text("{malformed json: true,", encoding="utf-8")
+    # Write a valid JSON file
+    (reports_dir / "overhead.json").write_text(
+        json.dumps({"pct_of_one_core": 0.42, "cgroups": 10.0}),
+        encoding="utf-8",
+    )
+
+    status, reports = client.get_json("/api/reports")
+    assert status == 200
+    # Malformed file must return null
+    assert reports["slo"] is None
+    # Valid file must return its parsed object
+    assert reports["overhead"] is not None
+    assert reports["overhead"]["pct_of_one_core"] == pytest.approx(0.42)
+    assert reports["overhead"]["cgroups"] == pytest.approx(10.0)
+
+
+def test_new_report_schemas_api(test_setup):
+    client, port, tmp_path = test_setup
+    reports_dir = tmp_path / "reports"
+    slo_v2 = {
+        "slo_target_ms": 10.5,
+        "iters": 1200,
+        "warmup_s": 70,
+        "metric": "fraction of 1-second windows whose end-to-end p99 exceeds slo_target_ms",
+        "apply_late_runs": ["rep0_C"],
+        "conditions": {
+            "A": {
+                "p50_ms": 2.1,
+                "p99_ms": 4.5,
+                "rep_p99_ms": [4.2, 4.5, 4.8],
+                "violation_rate": 0.0,
+                "threshold_sensitivity": {"1.5x": 0.0, "2x": 0.0, "3x": 0.0},
+                "cpuhog_ips": None,
+            },
+            "W": {
+                "p50_ms": 3.0,
+                "p99_ms": 8.0,
+                "rep_p99_ms": {"min": 7.5, "mean": 8.0, "max": 8.5},
+                "violation_rate": 0.15,
+                "threshold_sensitivity": {"1.5x": 0.25, "2x": 0.15, "3x": 0.05},
+                "cpuhog_ips": 1000.0,
+            },
+            "C": {
+                "p50_ms": 2.5,
+                "p99_ms": 5.2,
+                "rep_p99_ms": [5.0, 5.2, 5.4],
+                "violation_rate": 0.02,
+                "threshold_sensitivity": {"1.5x": 0.08, "2x": 0.02, "3x": 0.0},
+                "cpuhog_ips": 1100.0,
+            },
+        },
+        "applied_plans": {
+            "C": [{"cgroup": "/slice/hog", "cpu.max": "200000 100000", "cpu.weight": 100}],
+            "W": [{"cgroup": "/slice/svc", "cpu.max": None, "cpu.weight": 1000}],
+        },
+    }
+    forecast_v2 = {
+        "test_all": {
+            "lstm": {"pinball": 0.008, "coverage": 0.95},
+            "lstm_noattn": {"pinball": 0.009, "coverage": 0.94},
+            "last_window": {"pinball": 0.014, "coverage": 0.80},
+            "last_window_cal": {"pinball": 0.010, "coverage": 0.95},
+        },
+        "test_seasonal_subset": {
+            "lstm": {"pinball": 0.007, "coverage": 0.96},
+            "seasonal_naive": {"pinball": 0.011, "coverage": 0.85},
+            "seasonal_naive_cal": {"pinball": 0.008, "coverage": 0.95},
+            "n_windows": 1000,
+        },
+        "attention_entropy": {"mean": 3.86, "p5": 3.84, "p95": 3.87, "uniform": 3.87},
+    }
+    placement_v2 = {
+        "ci_method": "t",
+        "seeds": [0, 1, 2, 3, 4],
+        "util_scale": 1.4,
+        "host_slack": 2.0,
+        "summary": {
+            "FirstFit": {"energy_kwh": {"mean": 65.0, "ci95": 1.5}},
+            "ForecastFirstFit_0.8": {"energy_kwh": {"mean": 62.0, "ci95": 1.2}},
+            "ForecastBestFit_1.0": {"energy_kwh": {"mean": 61.5, "ci95": 1.1}},
+            "DQN": {"energy_kwh": {"mean": 59.0, "ci95": 1.0}},
+        },
+    }
+    (reports_dir / "slo.json").write_text(json.dumps(slo_v2), encoding="utf-8")
+    (reports_dir / "forecast.json").write_text(json.dumps(forecast_v2), encoding="utf-8")
+    (reports_dir / "placement_study.json").write_text(json.dumps(placement_v2), encoding="utf-8")
+
+    status, reports = client.get_json("/api/reports")
+    assert status == 200
+    assert reports["slo"]["iters"] == 1200
+    assert reports["slo"]["applied_plans"]["W"][0]["cpu.weight"] == 1000
+    assert reports["forecast"]["attention_entropy"]["mean"] == pytest.approx(3.86)
+    assert "ForecastFirstFit_0.8" in reports["placement_study"]["summary"]
+    assert reports["placement_study"]["ci_method"] == "t"
+
+
+def test_ui_includes_new_elements(test_setup):
+    client, port, _ = test_setup
+    _, _, body = client.request("GET", "/")
+    html = body.decode("utf-8")
+    assert "plan-stale-warning" in html
+    assert "plan-age" in html
+    assert "forecast-seasonal-table" in html
+    assert "attention-entropy-line" in html
+    assert "slo-sensitivity-table" in html
+    assert "slo-late-warning" in html
+
+    _, _, js_body = client.request("GET", "/app.js")
+    js = js_body.decode("utf-8")
+    assert "stale plan" in js
+    assert "threshold_sensitivity" in js
+    assert "test_seasonal_subset" in js
+    assert "attention entropy" in js
+    assert "ci_method" in js
+    assert "innerHTML" not in js
 

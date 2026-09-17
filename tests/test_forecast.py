@@ -9,10 +9,14 @@ import torch
 
 from irm.forecast import (
     AttnLSTM,
+    PlainLSTM,
+    compute_attention_entropy,
     demo,
+    fit_offset,
     metrics,
     pinball,
     predict_q95,
+    seasonal_base,
     split_windows,
     synthetic,
     time_split,
@@ -113,7 +117,10 @@ def test_tiny_demo_writes_json_and_model(tmp_path: Path):
 
     for key in (
         "test_all",
+        "test_seasonal_subset",
         "test_arima_subset",
+        "offsets",
+        "attention_entropy",
         "n_windows",
         "arima_failures",
         "epochs_run",
@@ -124,10 +131,32 @@ def test_tiny_demo_writes_json_and_model(tmp_path: Path):
         assert key in doc
 
     assert "lstm" in doc["test_all"]
+    assert "lstm_noattn" in doc["test_all"]
     assert "last_window" in doc["test_all"]
+    assert "last_window_cal" in doc["test_all"]
+
+    for subkey in (
+        "lstm",
+        "lstm_noattn",
+        "seasonal_naive",
+        "seasonal_naive_cal",
+        "last_window",
+        "last_window_cal",
+        "n_windows",
+    ):
+        assert subkey in doc["test_seasonal_subset"]
+
     assert "lstm" in doc["test_arima_subset"]
+    assert "lstm_noattn" in doc["test_arima_subset"]
     assert "last_window" in doc["test_arima_subset"]
+    assert "seasonal_naive_cal" in doc["test_arima_subset"]
     assert "arima" in doc["test_arima_subset"]
+
+    assert "seasonal_naive" in doc["offsets"]
+    assert "last_window" in doc["offsets"]
+
+    for k in ("mean", "p5", "p95", "uniform"):
+        assert k in doc["attention_entropy"]
 
     assert isinstance(doc["n_windows"], int) and doc["n_windows"] > 0
     assert isinstance(doc["arima_failures"], int)
@@ -184,3 +213,97 @@ def test_synthetic_invariants():
     # Ordering invariant: cpu_max >= cpu_avg >= cpu_min
     assert (data1["cpu_max"] >= data1["cpu_avg"]).all()
     assert (data1["cpu_avg"] >= data1["cpu_min"]).all()
+
+
+def test_seasonal_base_toy_period_288():
+    period = 288
+    T = 600
+    rng = np.random.default_rng(123)
+    base_pattern = rng.uniform(10.0, 80.0, size=period).astype(np.float32)
+    series = np.tile(base_pattern, int(np.ceil(T / period)))[:T]
+
+    for t in [288, 300, 450, 580]:
+        base = seasonal_base(series, t=t, t_out=12, period=period)
+        assert len(base) == 12
+        # On a toy series with period 288, the seasonal base for target step t equals the value at t-288
+        assert base[0] == series[t - 288]
+        for j in range(12):
+            assert base[j] == series[t + j - 288]
+
+
+def test_offset_calibration_held_out_coverage():
+    rng = np.random.default_rng(42)
+    n_val = 50000
+    val_res = rng.normal(loc=0.0, scale=0.1, size=n_val)
+    val_base = np.zeros(n_val, dtype=np.float64)
+    val_y = val_res.copy()
+
+    offset = fit_offset(val_base, val_y, tau=0.95)
+
+    n_test = 50000
+    test_res = rng.normal(loc=0.0, scale=0.1, size=n_test)
+    test_base = np.zeros(n_test, dtype=np.float64)
+    test_y = test_res.copy()
+
+    test_pred_cal = test_base + offset
+    coverage = float(np.mean(test_y <= test_pred_cal))
+
+    # Calibrated coverage on held-out residuals is within 0.03 of 0.95
+    assert abs(coverage - 0.95) <= 0.03
+
+
+def test_plain_lstm_output_shape():
+    B = 7
+    model = PlainLSTM(hidden=64, t_in=48, t_out=12)
+    x = torch.randn(B, 48, 5)
+    d = torch.randn(B, 12, 2)
+    q, attn = model(x, d)
+    # PlainLSTM output shape [B, 12]
+    assert q.shape == (B, 12)
+    assert attn is None
+
+
+def test_attention_entropy_uniform():
+    uniform_val = np.log(48)
+    attn = np.full((16, 12, 48), 1.0 / 48.0, dtype=np.float64)
+    stats = compute_attention_entropy(attn, t_in=48)
+
+    # Entropy of uniform weights equals ln(48)
+    assert pytest.approx(stats["uniform"], 1e-6) == uniform_val
+    assert pytest.approx(stats["mean"], 1e-6) == uniform_val
+    assert pytest.approx(stats["p5"], 1e-6) == uniform_val
+    assert pytest.approx(stats["p95"], 1e-6) == uniform_val
+
+
+def test_no_calibration_uses_test_windows():
+    data = synthetic(V=12, T=500, seed=0)
+    X, D, Y, t_end = windows(data)
+    train_idx, val_idx, test_idx = time_split(t_end, T=500)
+    seasonal_all, has_seasonal = seasonal_base(data)
+
+    p95_val = np.percentile(X[val_idx, :, 2], 95, axis=1, keepdims=True)
+    base_last_val = np.repeat(p95_val, 12, axis=1)
+    offset_last_orig = fit_offset(base_last_val, Y[val_idx], tau=0.95)
+
+    val_seasonal_idx = val_idx[has_seasonal[val_idx]]
+    offset_seasonal_orig = fit_offset(seasonal_all[val_seasonal_idx], Y[val_seasonal_idx], tau=0.95)
+
+    # Perturb test region (t >= 400)
+    data_perturbed = {k: v.copy() if isinstance(v, np.ndarray) else v for k, v in data.items()}
+    data_perturbed["cpu_max"][:, 400:] += 50.0
+
+    X_p, D_p, Y_p, t_end_p = windows(data_perturbed)
+    train_idx_p, val_idx_p, test_idx_p = time_split(t_end_p, T=500)
+    seasonal_all_p, has_seasonal_p = seasonal_base(data_perturbed)
+
+    p95_val_p = np.percentile(X_p[val_idx_p, :, 2], 95, axis=1, keepdims=True)
+    base_last_val_p = np.repeat(p95_val_p, 12, axis=1)
+    offset_last_pert = fit_offset(base_last_val_p, Y_p[val_idx_p], tau=0.95)
+
+    val_seasonal_idx_p = val_idx_p[has_seasonal_p[val_idx_p]]
+    offset_seasonal_pert = fit_offset(seasonal_all_p[val_seasonal_idx_p], Y_p[val_seasonal_idx_p], tau=0.95)
+
+    # Assert offsets are completely unchanged when test targets are perturbed
+    assert offset_last_orig == offset_last_pert
+    assert offset_seasonal_orig == offset_seasonal_pert
+

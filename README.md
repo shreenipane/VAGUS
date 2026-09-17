@@ -1,78 +1,70 @@
 # VAGUS
 
-**Autonomous MAPE-K Intelligent Resource & QoS Manager for Linux Servers**
+**Intelligent Resource & QoS Manager for Linux Servers**
 
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/)
 [![Linux Cgroups v2](https://img.shields.io/badge/cgroups-v2-success.svg)](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html)
-[![eBPF](https://img.shields.io/badge/kernel-eBPF-orange.svg)](https://ebpf.io/)
+[![eBPF](https://img.shields.io/badge/kernel-eBPF%20prototype-orange.svg)](https://ebpf.io/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![Tests](https://img.shields.io/badge/tests-94%20passed-brightgreen.svg)]()
 
-VAGUS is an autonomic **MAPE-K (Monitor → Analyse → Plan → Execute)** closed-loop resource recommendation and QoS enforcement engine for Linux hosts and virtualized clusters. It eliminates worst-case over-provisioning and prevents noisy-neighbour starvation using kernel-level eBPF attribution, deep sequence forecasting, and safe, journaled cgroup v2 actuation.
+VAGUS is a **Monitor → Plan → Execute** resource management engine for Linux servers and multi-tenant clusters, paired with an offline deep-learning analytics plane. It addresses data center over-provisioning and noisy-neighbor interference through kernel telemetry, empirical tail-demand sizing, safe journaled cgroup v2 actuation, and reinforcement learning placement.
 
 ---
 
-## 🚀 Key Results & Proof
+## 🚀 Key Experimental Findings & Benchmarks
 
-All claims are backed by rigorous, reproducible empirical measurements on live systems:
+All figures are backed by reproducible measurements from the test suite and evaluation reports:
 
-| Metric | Unmanaged Baseline (Noisy Neighbors) | Managed by VAGUS (`irm`) | Improvement |
-|---|:---:|:---:|:---:|
-| **Tail Latency (P99)** | `22.13 ms` | **`9.53 ms`** | **57% lower latency** |
-| **SLO Violation Rate** | `55.37%` | **`3.52%`** | **>15× violation reduction** |
-| **Telemetry Overhead** | — | **`0.68% of 1 core`** | Negligible footprint (<0.05% host) |
-| **Cluster Overload (DQN)** | Heuristic Best-Fit baseline | Deep Q-Network Placement | **33% reduction in SLA overload** |
+| Metric | Baseline | Managed by VAGUS (`irm`) | Result & Context |
+|---|:---:|:---:|:---|
+| **Tail Latency (P99)** | `22.13 ms` | **`9.53 ms`** | **57% lower latency** (one-shot, same-host open-loop HTTP under multi-core CPU & UDP flood contention via `cpu.weight=1000` priority + hog quota) |
+| **SLO Violation Rate** | `55.37%` | **`3.52%`** | **>15× violation reduction** across 540 measurement windows |
+| **Telemetry Overhead** | — | **`0.68% of 1 core`** | Measured passive collection at 5 s intervals over 135 leaf cgroups (<0.05% host CPU) |
+| **Cluster Overload (DQN)** | Heuristic First-Fit: `15.66%` | Deep Q-Network: **`10.60%`** | **~33% overload reduction** in a 5-seed trace-driven cluster simulation |
 
 ---
 
 ## 🏛️ System Architecture
 
-VAGUS operates on an autonomic closed-loop architecture:
+VAGUS separates live host management from offline model research:
 
 ```mermaid
 flowchart LR
-    subgraph Monitor["1. Monitor"]
+    subgraph Monitor["1. Monitor (Live Host)"]
         direction TB
-        CG["cgroups v2 & /proc"] --> Collector["Passive Telemetry Engine"]
-        BPF["eBPF cgroup_skb"] --> Attrib["SoftIRQ Attribution"]
+        CG["cgroups v2 & /proc"] --> Collector["Passive Telemetry Engine\n(<0.7% of 1 core)"]
+        BPF["eBPF cgroup_skb\n(Kernel prototype)"] -.-> Attrib["SoftIRQ Attribution Math\n(irm/attrib.py)"]
         Collector --> DB[(SQLite irm.db)]
-        Attrib --> DB
+        Attrib -.-> DB
     end
 
-    subgraph Analyse["2. Analyse"]
+    subgraph HostPlan["2. Host Plan & Execute"]
         direction TB
-        DB --> LSTM["Attention-LSTM Forecaster\n(P95 CPU demand)"]
-        DB --> GBDT["Gradient-Boosted Trees\n(Lifetime & Sizing)"]
+        DB --> Rec["Host Recommender (irm/recommend.py)\nEmpirical P95, Headroom & Background Budget"]
+        Rec --> DryRun{"Dry-Run Preview\n(Default)"}
+        DryRun -->|Operator Approved| CGV2["cgroup v2 writes\n(cpu.max, memory.high, cpu.weight)"]
+        CGV2 --> Rollback["Journaled Revert / Undo"]
     end
 
-    subgraph Plan["3. Plan"]
+    subgraph OfflineResearch["3. Offline Research Plane"]
         direction TB
-        LSTM --> Rec["Host Recommender\n(Slack & Background Budget)"]
-        GBDT --> DQN["Deep Q-Network (DQN)\nCluster VM Placement"]
-    end
-
-    subgraph Execute["4. Execute"]
-        direction TB
-        Rec --> DryRun{"Dry-Run / Approved?"}
-        DryRun -->|Journaled| CGV2["cgroup v2 writes\n(cpu.max, memory.high, cpu.weight)"]
-        CGV2 --> Rollback["Revert / Undo Journal"]
+        DB & Synth["Synthetic Workload Trace"] --> LSTM["Attention-LSTM Forecaster\n(irm/forecast.py, P95 Quantile)"]
+        Synth --> DQN["Deep Q-Network Cluster Placement\n(irm/dqn.py & irm/sim.py)"]
     end
 ```
 
-### Core Components
+### Component Details
 
-1. **Monitor**:
-   - High-efficiency passive telemetry from cgroups v2 (`cpu.stat`, `memory.current`, `io.stat`) and `/proc/stat`.
-   - Kernel eBPF ingress filter (`cgroup_skb`) that measures network packet counts and proportionally attributes `NET_RX` softirq CPU time to the true consumer cgroup rather than whichever thread was interrupted.
-2. **Analyse**:
-   - Sequence-to-sequence Attention-LSTM forecasting P95 CPU demand over future horizons.
-   - Resource-Central style offline gradient boosted trees predicting lifetime buckets and tail demand at task inception.
-3. **Plan**:
-   - Co-location-aware placement engine powered by Deep Q-Learning (Double-DQN) evaluated in trace-driven cluster simulation against First-Fit and Best-Fit baselines.
-   - Host-level recommender calculating dynamic headroom, background demand subtraction, and safe resource clamps from empirical P95 telemetry.
-4. **Execute**:
-   - Validated, journaled, and revertible configuration of `cpu.max`, `memory.high`, and `cpu.weight`.
-   - Strict validation: path prefix containment, integer boundaries, memory high usage multipliers, and dry-run safety by default.
+1. **Monitor (`irm/monitor.py`)**:
+   - Passive telemetry collector sampling leaf cgroups v2 (`cpu.stat`, `memory.current`, `io.stat`) and `/proc/stat` into SQLite (`data/irm.db`).
+   - eBPF packet attribution architecture (`bpf/attrib.bpf.c` and `bpf/attrib.c`): Attaches an ingress `cgroup_skb` filter to count packets per socket cgroup ID, proportionally attributing `NET_RX` softirq CPU time.
+2. **Plan & Execute (`irm/recommend.py`, `irm/execute.py`)**:
+   - **Recommender**: Uses observed empirical 95th percentile (P95) demand, reserves protected headroom, accounts for background workloads, and sizes `cpu.max` and `cpu.weight`.
+   - **Executor**: Validates paths within allowed systemd subtrees, enforces memory usage floors (memory high multiplier), performs dry runs by default, and maintains a transaction journal for instant rollback (`irm revert`).
+3. **Research Plane (`irm/forecast.py`, `irm/dqn.py`, `irm/sim.py`)**:
+   - **Sequence Forecaster**: Encoder–decoder Attention-LSTM estimating future P95 demand against seasonal-naive and ARIMA baselines.
+   - **DQN Cluster Consolidation**: Double-DQN scheduler placing workloads across simulated clusters, optimizing SLA overload and energy tradeoffs.
 
 ---
 
@@ -82,7 +74,7 @@ flowchart LR
 
 - Linux system with **cgroups v2** enabled (`stat -fc %T /sys/fs/cgroup` returns `cgroup2fs`).
 - Python ≥ 3.14 and `uv` package manager.
-- `bubblewrap` (for sandboxed test and model isolation).
+- `bubblewrap` (for sandboxed test isolation).
 - Systemd user session.
 
 ### 1. Installation
@@ -92,10 +84,10 @@ flowchart LR
 git clone https://github.com/shreenipane/VAGUS.git
 cd VAGUS
 
-# Ensure ~/.local/bin is on PATH (for irm / vagus commands)
+# Ensure ~/.local/bin is on PATH (where irm / vagus CLI tools live)
 export PATH="$HOME/.local/bin:$PATH"
 
-# Synchronize dependencies into external isolated venv
+# Synchronize dependencies into isolated external virtual environment
 UV_PROJECT_ENVIRONMENT=~/.local/share/irm/venv uv sync
 ```
 
@@ -104,13 +96,13 @@ UV_PROJECT_ENVIRONMENT=~/.local/share/irm/venv uv sync
 ```bash
 ./run_all.sh
 ```
-This runs the full test suite in the sandbox, launches the background telemetry collector, starts the web dashboard, and opens `http://127.0.0.1:8765`.
+Runs the test suite, launches the background telemetry monitor, starts the web dashboard, and opens `http://127.0.0.1:8765`.
 
 ---
 
 ## 🛠️ Command Line Interface
 
-VAGUS provides the `irm` (and `vagus`) CLI for operational management:
+VAGUS provides the `irm` (and `vagus`) CLI:
 
 ```bash
 # --- Telemetry & Dashboard ---
@@ -118,30 +110,39 @@ irm monitor &                             # Collect telemetry every 5s into data
 irm dashboard                             # Launch read-only local dashboard (http://127.0.0.1:8765)
 
 # --- Recommendation & Execution ---
-irm recommend --min-samples 12 --hours 1  # Generate recommendations for busy cgroups
-irm recommend --protect <service.scope> --only <hog.scope>  # Protect critical service, throttle noisy neighbour
-irm apply                                 # Dry run: previews old -> new adjustments
-irm apply --yes                           # Writes limits atomically to cgroup v2 with journaling
-irm revert                                # Immediately reverts the last applied batch
+irm recommend --min-samples 12 --hours 1  # Compute recommendations from empirical P95
+irm recommend --protect <srv.scope> --only <hog.scope> --out data/plan.json
+irm apply --from data/plan.json           # Dry run: preview proposed limit changes
+irm apply --from data/plan.json --yes     # Apply cgroup v2 limits with transaction journal
+irm revert                                # Undo the last applied batch from journal
 
-# --- Models & Benchmarking ---
-irm train forecast                        # Train Attention-LSTM CPU demand forecaster
-irm evaluate placement                    # Evaluate First-Fit, Best-Fit, and DQN consolidation
-irm bench overhead --seconds 60           # Benchmark collector host CPU overhead (<1% core)
-irm experiment slo --minutes 3 --reps 3   # Run live closed-loop SLO experiment
+# --- Research & Benchmarks ---
+irm train forecast                        # Train & evaluate Attention-LSTM forecaster
+irm evaluate placement                    # Run simulated cluster placement evaluation
+irm bench overhead --seconds 60           # Benchmark collector overhead (<1% core)
+irm experiment slo --minutes 3 --reps 3   # Run live closed-loop SLO contention experiment
 ```
 
 ---
 
-## 🔬 Live SLO Experiment Validation
+## 🔬 Live SLO Experiment
 
-VAGUS includes an end-to-end open-loop benchmarking framework (`irm experiment slo`) to measure service level performance under noisy neighbor interference:
+VAGUS includes an open-loop benchmarking harness (`irm experiment slo`) comparing three conditions in rotation:
 
-- **Condition A (Baseline)**: Latency-sensitive HTTP service running alone.
-- **Condition B (Unmanaged Contention)**: Service co-located with a multi-core CPU burner (`cpuhog`) and line-rate UDP network flood (`nethog`).
-- **Condition C (VAGUS Managed)**: Same contention as B, with VAGUS actively monitoring, protecting the latency-sensitive scope, and dynamically clamping hogs.
+- **Condition A (Solo Baseline)**: Latency-sensitive HTTP service running uncontended.
+- **Condition B (Noisy Neighbours)**: Service co-located with a multi-core CPU burner (`cpuhog`) and line-rate UDP network flood (`nethog`).
+- **Condition C (VAGUS Managed)**: Same contention as B, with VAGUS protecting the service (`cpu.weight=1000`) and throttling hogs.
 
-Results stored in [`reports/slo.json`](reports/slo.json) demonstrate that VAGUS recovers P99 tail latency from **22.1 ms down to 9.5 ms**, while slashing SLO violations from **55.4% down to 3.5%**.
+In empirical trials (`reports/slo.json`), P99 tail latency improved from **22.1 ms down to 9.5 ms** (a **57% reduction**), with SLO violations dropping from **55.4% to 3.5%**.
+
+---
+
+## 📚 Prior Art & References
+
+- **Iron (Khalid et al., NSDI 2018)**: *Iron: Mitigating the Performance Impact of Software Interrupts in Container Environments*. Per-container softirq accounting and quota enforcement.
+- **EVMC (Zhang et al., Electronics 2025)**: *Energy-Efficient Virtual Machine Consolidation in Cloud Data Centers*. Co-location correlation coefficient $K = (1 - \rho)/2$.
+- **Resource Central (Cortez et al., SOSP 2017)**: *Resource Central: Understanding and Predicting Workloads for Improved Resource Management in Large Cloud Platforms*.
+- **OSDI '99 (Banga, Druschel, Mogul)**: *Resource Containers: A New Facility for Resource Management in Operating Systems*.
 
 ---
 
@@ -149,24 +150,25 @@ Results stored in [`reports/slo.json`](reports/slo.json) demonstrate that VAGUS 
 
 | Path | Description |
 |---|---|
-| [`irm/`](irm/) | Core engine: `monitor`, `attrib`, `forecast`, `dqn`, `sim`, `recommend`, `execute`, `dashboard`, `experiment` |
-| [`bpf/`](bpf/) | Kernel eBPF source (`attrib.bpf.c`), C userspace loader (`attrib.c`), and build harness |
-| [`tests/`](tests/) | Comprehensive pytest suite (unit, integration, regression, security boundary tests) |
-| [`data/`](data/) | SQLite telemetry database (`irm.db`), trace caches, and recommendation journals |
-| [`reports/`](reports/) | Empirical result artifacts (`slo.json`, `forecast.json`, `placement_study.json`, `overhead.json`) |
-| [`HOWTO.md`](HOWTO.md) | Step-by-step setup, configuration, and execution guide |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | In-depth architectural design, data pipelines, and rationale |
-| [`SECURITY.md`](SECURITY.md) | Security model, sandbox containment, and privilege separation |
-| [`PRD.md`](PRD.md) | Product requirements and formal project scope |
-| [`BUILD_LOG.md`](BUILD_LOG.md) | Engineering changelog and verified milestone logs |
+| [`irm/`](irm/) | Core engine: `monitor`, `recommend`, `execute`, `dashboard`, `forecast`, `dqn`, `sim`, `attrib`, `experiment` |
+| [`bpf/`](bpf/) | Kernel eBPF source (`attrib.bpf.c`), C loader (`attrib.c`), and `Makefile` |
+| [`tests/`](tests/) | Comprehensive pytest suite covering unit, integration, and security boundaries |
+| [`data/`](data/) | Telemetry database (`irm.db`), recommendation plans, and experiment cache |
+| [`reports/`](reports/) | Empirical benchmark results (`slo.json`, `forecast.json`, `placement_study.json`, `overhead.json`) |
+| [`HOWTO.md`](HOWTO.md) | Step-by-step setup and operational guide |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Technical architecture, data flows, and design decisions |
+| [`SECURITY.md`](SECURITY.md) | Threat model, jail containment, and privilege isolation |
+| [`PRD.md`](PRD.md) | Product requirements and formal scope |
+| [`BUILD_LOG.md`](BUILD_LOG.md) | Development audit trail, gate checks, and experiment logs |
+| [`council meeting.md`](council%20meeting.md) | Independent verification and review report |
 
 ---
 
 ## 🔒 Security & Containment
 
-- **Zero Unchecked Execution**: All agent code execution and tests are confined in a read-only root `bubblewrap` jail without network access, environment bleed, or host PID visibility.
-- **Defensive Cgroup Actuation**: Actuations require delegated subtrees, strict canonical path checks, memory clamping above live usage, and transaction journaling.
-- **Minimal Local Footprint**: Web dashboard binds strictly to `127.0.0.1`, enforces `Host` header validation, and restricts all updates to parameterized, read-only telemetry views.
+- **Jailed Execution**: All tests and research model evaluations are executed inside a bubblewrap sandbox with read-only root, tmpfs over home/root/tmp, no network access, and no host PID visibility.
+- **Defensive Actuation**: Actuations strictly enforce prefix matching to delegated user systemd subtrees, reject path traversal, clamp memory above current usage, and enforce dry runs by default.
+- **Local Control Plane**: The dashboard binds exclusively to `127.0.0.1` and enforces `Host` header validation to guard against DNS rebinding.
 
 ---
 

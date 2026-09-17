@@ -1,4 +1,4 @@
-# Intelligent Resource Manager — Product Requirements
+# VAGUS — Product Requirements
 
 Author & Lead Architect: Shree Nipane (@shreenipane). Source: `~/Downloads/Intelligent_Linux_Resource_Management_260917_011044.pdf`.
 
@@ -6,17 +6,17 @@ Author & Lead Architect: Shree Nipane (@shreenipane). Source: `~/Downloads/Intel
 
 | Proposal claim (slide) | What it means for this project |
 |---|---|
-| Data centres over-provision by up to 50% for worst-case spikes (2) | Limits should follow predicted **tail** demand, not requested size |
+| Data centres over-provision by up to 50% for worst-case spikes (2) | Limits should follow observed/predicted **tail** demand, not static allocation |
 | Bursts and co-location blindness still cause SLA violations (2, 4) | Placement must consider *when* workloads peak, not only how big they are |
-| Kernel work (softirqs, protocol processing) is misattributed (3) | The resource principal is the cgroup, and kernel work done for it must be measured |
-| ARIMA assumes stationary data; bursty cloud load is heavy-tailed (4) | Forecast P95 directly, with a sequence model, and compare against ARIMA |
+| Kernel work (softirqs, protocol processing) is invisible to cgroups (3) | The resource principal is the cgroup; kernel work done for it must be measured via eBPF |
+| ARIMA assumes stationary data; bursty cloud load is heavy-tailed (4) | Forecast P95 directly, with a sequence model, and compare against seasonal baselines |
 | First-Fit / Best-Fit ignore temporal correlation between VMs (4) | A learned placer uses co-location coefficients (EVMC, Zhang et al. '25) |
 
 ## 2. Goal
 
-A MAPE-K autonomic loop for a Linux server that **recommends**, and on explicit approval **enforces**, cgroup v2
+A resource management platform for Linux servers that **recommends**, and on explicit approval **enforces**, cgroup v2
 resource limits, together with a trace-driven cluster simulator that evaluates co-location-aware consolidation. Every
-claim is backed by a reproducible measurement.
+claim is backed by reproducible measurements.
 
 ## 3. Users
 
@@ -27,11 +27,11 @@ claim is backed by a reproducible measurement.
 
 | # | Deliverable | Built as |
 |---|---|---|
-| 1 | Telemetry engineering, sub-1% observer overhead | `irm monitor` (cgroups v2 + `/proc` + PSI) and `bpf/attrib` (eBPF softirq attribution) |
-| 2 | ML model deployment: P95 tail demand and VM lifetime | Gradient-boosted trees (P95 and lifetime buckets); attention-LSTM P95 forecaster |
-| 3 | DQN scheduler for co-location-aware consolidation | Double DQN over a simulated cluster replaying the Azure 2019 trace |
+| 1 | Telemetry engineering, sub-1% observer overhead | `irm monitor` (cgroups v2 + `/proc` + PSI) and `bpf/attrib` (eBPF softirq attribution prototype) |
+| 2 | ML model deployment: P95 tail demand forecasting | Sequence-to-sequence Attention-LSTM P95 forecaster on bursty workloads |
+| 3 | DQN scheduler for co-location-aware consolidation | Double-DQN scheduler over a trace-driven simulated cluster |
 | 4 | Kernel-level enforcement | eBPF measurement + cgroup v2 enforcement. No kernel patch (user decision, ARCHITECTURE D1) |
-| + | End-to-end proof | Live SLO experiment; `irm reproduce`; `REPORT.md` (user decision, 2026-09-17) |
+| + | End-to-end proof | Live SLO experiment with rotation arms (A, B, C, W, K) and raw latency telemetry |
 
 ## 5. Golden paths
 

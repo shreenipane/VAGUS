@@ -8,6 +8,8 @@ from irm.sim import (
     STEP,
     BestFit,
     FirstFit,
+    ForecastBestFit,
+    ForecastFirstFit,
     Policy,
     Simulator,
     compute_k,
@@ -335,5 +337,65 @@ def test_simulator_use_k_false():
 
     assert len(k_features) > 0
     assert all(k == 0.5 for k in k_features)
+
+
+def test_forecast_best_fit_respects_cap_and_fallback():
+    """ForecastBestFit respects the cap and falls back to lowest post_q95_frac."""
+    policy = ForecastBestFit(cap=1.0)
+
+    # 3 candidates: host_ids = [0, 1, 2]
+    # Feature 1: host_alloc_frac
+    # Feature 5: vm_cores_frac
+    # Feature 13: post_q95_frac
+    # Candidate 0: post_alloc = 0.4, post_q95_frac = 0.7 (qualifies)
+    # Candidate 1: post_alloc = 0.7, post_q95_frac = 0.9 (qualifies)
+    # Candidate 2: post_alloc = 0.9, post_q95_frac = 1.1 (exceeds cap 1.0)
+    features = np.zeros((3, 14), dtype=np.float32)
+    features[0, 1] = 0.3
+    features[0, 5] = 0.1
+    features[0, 13] = 0.7
+
+    features[1, 1] = 0.6
+    features[1, 5] = 0.1
+    features[1, 13] = 0.9
+
+    features[2, 1] = 0.8
+    features[2, 5] = 0.1
+    features[2, 13] = 1.1
+
+    # Candidate 1 has highest post_alloc among qualifying candidates (post_q95_frac <= 1.0)
+    assert policy.choose(features, [0, 1, 2]) == 1
+
+    # Fallback: all candidates exceed cap=1.0 -> choose lowest post_q95_frac
+    features_over = np.zeros((3, 14), dtype=np.float32)
+    features_over[0, 13] = 1.3
+    features_over[1, 13] = 1.1
+    features_over[2, 13] = 1.2
+    # Candidate 1 has lowest post_q95_frac (1.1)
+    assert policy.choose(features_over, [0, 1, 2]) == 1
+
+
+def test_forecast_first_fit_respects_cap_and_fallback():
+    """ForecastFirstFit respects the cap and falls back to lowest post_q95_frac."""
+    policy = ForecastFirstFit(cap=0.8)
+
+    # Candidate 0: post_q95_frac = 0.9 (> 0.8)
+    # Candidate 1: post_q95_frac = 0.7 (<= 0.8)
+    # Candidate 2: post_q95_frac = 0.5 (<= 0.8)
+    features = np.zeros((3, 14), dtype=np.float32)
+    features[0, 13] = 0.9
+    features[1, 13] = 0.7
+    features[2, 13] = 0.5
+
+    # Qualifying hosts are 1 and 2. Lowest host id is 1.
+    assert policy.choose(features, [0, 1, 2]) == 1
+
+    # Fallback: all candidates exceed cap=0.8 -> choose lowest post_q95_frac
+    features_over = np.zeros((3, 14), dtype=np.float32)
+    features_over[0, 13] = 0.95
+    features_over[1, 13] = 0.85
+    features_over[2, 13] = 0.90
+    # Candidate 1 has lowest post_q95_frac (0.85)
+    assert policy.choose(features_over, [0, 1, 2]) == 1
 
 

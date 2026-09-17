@@ -61,6 +61,8 @@
     <section class="card" id="card-plan">
       <h2 class="card-title">Plan / Execute</h2>
       <div id="plan-container">
+        <div id="plan-stale-warning" class="warning-text hidden"></div>
+        <div id="plan-age" class="overhead-text hidden"></div>
         <div class="table-wrapper" id="recs-table-wrapper">
           <table class="data-table" id="recs-table">
             <thead>
@@ -103,6 +105,23 @@
       <h2 class="card-title">Analyse / Research</h2>
       <div id="overhead-line" class="overhead-text">Monitor overhead: loading...</div>
 
+      <div class="sub-section hidden" id="forecast-seasonal-section">
+        <h3 class="sub-title">Seasonal Subset</h3>
+        <div class="table-wrapper">
+          <table class="data-table" id="forecast-seasonal-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Pinball</th>
+                <th>Coverage</th>
+              </tr>
+            </thead>
+            <tbody id="forecast-seasonal-tbody">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="sub-section">
         <h3 class="sub-title">Forecast Models</h3>
         <div class="table-wrapper">
@@ -120,6 +139,8 @@
           </table>
         </div>
       </div>
+
+      <div id="attention-entropy-line" class="overhead-text hidden"></div>
 
       <div class="sub-section">
         <h3 class="sub-title">Placement Evaluation</h3>
@@ -152,14 +173,14 @@
       <h2 class="card-title">Proof: SLO experiment</h2>
       <div id="slo-placeholder" class="placeholder">Run: irm experiment slo</div>
       <div id="slo-content" class="hidden">
+        <div id="slo-late-warning" class="warning-text hidden"></div>
         <div id="slo-target" class="overhead-text"></div>
         <div class="table-wrapper">
           <table class="data-table" id="slo-table">
             <thead>
               <tr>
-                <th>Condition</th>
+                <th>Arm</th>
                 <th>p50 ms</th>
-                <th>p95 ms</th>
                 <th>p99 ms</th>
                 <th>p99 range</th>
                 <th>SLO violations %</th>
@@ -170,12 +191,27 @@
             </tbody>
           </table>
         </div>
+        <div class="sub-section hidden" id="slo-sensitivity-section">
+          <h3 class="sub-title">Threshold Sensitivity</h3>
+          <div class="table-wrapper">
+            <table class="data-table" id="slo-sensitivity-table">
+              <thead>
+                <tr id="slo-sensitivity-header-row">
+                  <th>Arm</th>
+                </tr>
+              </thead>
+              <tbody id="slo-sensitivity-tbody">
+              </tbody>
+            </table>
+          </div>
+        </div>
         <div class="sub-section" id="slo-plan-section">
-          <h3 class="sub-title">Applied Plan</h3>
+          <h3 class="sub-title">Applied Plans</h3>
           <div class="table-wrapper">
             <table class="data-table" id="slo-plan-table">
               <thead>
                 <tr>
+                  <th>Arm</th>
                   <th>Cgroup</th>
                   <th>cpu.max</th>
                   <th>cpu.weight</th>

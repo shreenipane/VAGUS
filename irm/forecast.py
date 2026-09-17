@@ -195,7 +195,7 @@ def split_windows(
 
 
 class AttnLSTM(nn.Module):
-    """Encoder-decoder LSTM with additive Bahdanau attention per TRD §8."""
+    """Encoder-decoder LSTM with Luong multiplicative attention per TRD §8."""
 
     def __init__(self, hidden: int = 64, t_in: int = 48, t_out: int = 12):
         super().__init__()
@@ -239,6 +239,137 @@ class AttnLSTM(nn.Module):
         q = torch.stack(q_list, dim=1)
         attn = torch.stack(attn_list, dim=1)
         return q, attn
+
+
+class PlainLSTM(nn.Module):
+    """Encoder-decoder LSTM without attention (ablation)."""
+
+    def __init__(self, hidden: int = 64, t_in: int = 48, t_out: int = 12):
+        super().__init__()
+        self.hidden = hidden
+        self.t_in = t_in
+        self.t_out = t_out
+
+        self.encoder = nn.LSTM(input_size=5, hidden_size=hidden, batch_first=True)
+        self.decoder_cell = nn.LSTMCell(input_size=2, hidden_size=hidden)
+        self.fc1 = nn.Linear(hidden, hidden)
+        self.fc2 = nn.Linear(hidden, 1)
+
+    def forward(self, x: torch.Tensor, d: torch.Tensor) -> tuple[torch.Tensor, None]:
+        B = x.size(0)
+        enc_out, (h_n, c_n) = self.encoder(x)
+        h = h_n[-1]
+        c = c_n[-1]
+
+        q_list = []
+        t_out = d.size(1) if d is not None else self.t_out
+
+        for j in range(t_out):
+            cell_in = d[:, j, :]
+            h, c = self.decoder_cell(cell_in, (h, c))
+            q_j = self.fc2(torch.tanh(self.fc1(h))).squeeze(-1)
+            q_list.append(q_j)
+
+        q = torch.stack(q_list, dim=1)
+        return q, None
+
+
+def seasonal_base(
+    series_or_data: np.ndarray | dict,
+    t: int | None = None,
+    t_out: int = 12,
+    period: int = 288,
+    stride: int = 3,
+    t_in: int = 48,
+    v: int = 0,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
+    """Return seasonal base forecast.
+
+    - 1D array: returns series[t - period : t - period + t_out] for target step t.
+    - dict (data): returns (base_all [N, t_out], has_history [N]) matching windows(data).
+    """
+    if isinstance(series_or_data, dict):
+        cpu_max = np.asarray(series_or_data["cpu_max"], dtype=np.float32)
+        cpu_min = np.asarray(series_or_data["cpu_min"], dtype=np.float32)
+        cpu_avg = np.asarray(series_or_data["cpu_avg"], dtype=np.float32)
+        V, T = cpu_max.shape
+        W = t_in + t_out
+        if T < W:
+            return np.empty((0, t_out), dtype=np.float32), np.empty((0,), dtype=bool)
+
+        start_indices = np.arange(0, T - W + 1, stride, dtype=np.int64)
+        sw_min = np.lib.stride_tricks.sliding_window_view(cpu_min, W, axis=1)[:, ::stride, :]
+        sw_avg = np.lib.stride_tricks.sliding_window_view(cpu_avg, W, axis=1)[:, ::stride, :]
+        sw_max = np.lib.stride_tricks.sliding_window_view(cpu_max, W, axis=1)[:, ::stride, :]
+
+        valid = (
+            np.isfinite(sw_min).all(axis=-1)
+            & np.isfinite(sw_avg).all(axis=-1)
+            & np.isfinite(sw_max).all(axis=-1)
+        )
+        v_idx, k_idx = np.where(valid)
+        N = len(v_idx)
+        if N == 0:
+            return np.empty((0, t_out), dtype=np.float32), np.empty((0,), dtype=bool)
+
+        t_first = start_indices[k_idx] + t_in
+        has_history = t_first >= period
+
+        seasonal = np.zeros((N, t_out), dtype=np.float32)
+        valid_pos = np.where(has_history)[0]
+        if len(valid_pos) > 0:
+            sw_seasonal = np.lib.stride_tricks.sliding_window_view(cpu_max / 100.0, t_out, axis=1)
+            t0 = t_first[valid_pos] - period
+            v_sel = v_idx[valid_pos]
+            seasonal[valid_pos] = sw_seasonal[v_sel, t0]
+
+        return seasonal, has_history
+    else:
+        arr = np.asarray(series_or_data, dtype=np.float32)
+        if arr.ndim == 2:
+            arr = arr[v]
+        if t is None:
+            raise ValueError("Target step t must be specified for a series array")
+        if t < period:
+            raise ValueError(f"Target step {t} has no seasonal history with period {period}")
+        return arr[t - period : t - period + t_out]
+
+
+def fit_offset(base: np.ndarray, y: np.ndarray, tau: float = 0.95) -> float:
+    """Fit a scalar calibration offset as the tau-quantile of (y - base) over all target steps."""
+    residuals = (y - base).ravel()
+    if len(residuals) == 0:
+        return 0.0
+    return float(np.quantile(residuals, tau))
+
+
+def compute_attention_entropy(attn: np.ndarray | torch.Tensor, t_in: int = 48) -> dict[str, float]:
+    """Compute per-sample attention entropy averaged across decoder steps."""
+    uniform_val = float(np.log(t_in))
+    if isinstance(attn, torch.Tensor):
+        attn_arr = attn.detach().cpu().numpy()
+    else:
+        attn_arr = np.asarray(attn, dtype=np.float64)
+
+    if len(attn_arr) == 0:
+        return {
+            "mean": uniform_val,
+            "p5": uniform_val,
+            "p95": uniform_val,
+            "uniform": uniform_val,
+        }
+
+    eps = 1e-12
+    attn_safe = np.clip(attn_arr, eps, 1.0)
+    h_step = -np.sum(attn_arr * np.log(attn_safe), axis=-1)  # [N, t_out]
+    h_sample = np.mean(h_step, axis=1)  # [N]
+
+    return {
+        "mean": float(np.mean(h_sample)),
+        "p5": float(np.percentile(h_sample, 5)),
+        "p95": float(np.percentile(h_sample, 95)),
+        "uniform": uniform_val,
+    }
 
 
 def pinball(q, y, tau: float = 0.95):
@@ -347,82 +478,90 @@ def demo(
     arima_windows: int = 100,
 ) -> dict:
     """Train and evaluate the forecaster prototype, writing JSON and models/forecast.pt."""
-    torch.manual_seed(seed)
-    rng = np.random.default_rng(seed)
-
     data = synthetic(V, T, seed)
     X, D, Y, t_end = windows(data)
 
     train_idx, val_idx, test_idx = time_split(t_end, T=T)
 
     # Subsample training windows if more than 60,000
+    rng = np.random.default_rng(seed)
     if len(train_idx) > 60000:
         train_idx = rng.choice(train_idx, size=60000, replace=False)
-
-    model = AttnLSTM(hidden=64)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-
-    best_val_loss = float("inf")
-    best_state_dict = None
-    patience = 2
-    patience_counter = 0
-    epochs_run = 0
 
     batch_size = 512
     n_train = len(train_idx)
 
-    for epoch in range(1, epochs + 1):
-        epochs_run += 1
-        model.train()
-        train_perm = rng.permutation(train_idx)
-        train_losses = []
+    def _train(model: nn.Module) -> tuple[nn.Module, float, int]:
+        torch.manual_seed(seed)
+        model_rng = np.random.default_rng(seed)
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-        for i in range(0, n_train, batch_size):
-            batch_indices = train_perm[i : i + batch_size]
-            xb = torch.from_numpy(X[batch_indices])
-            db = torch.from_numpy(D[batch_indices])
-            yb = torch.from_numpy(Y[batch_indices])
+        best_val = float("inf")
+        best_sd = None
+        patience = 2
+        patience_ctr = 0
+        ep_run = 0
 
-            optimizer.zero_grad()
-            qb, _ = model(xb, db)
-            loss = pinball(qb, yb, tau=0.95)
-            loss.backward()
-            optimizer.step()
-            train_losses.append(loss.item() * len(batch_indices))
+        for epoch in range(1, epochs + 1):
+            ep_run += 1
+            model.train()
+            perm = model_rng.permutation(train_idx)
+            train_losses = []
 
-        train_loss = sum(train_losses) / max(1, n_train)
+            for i in range(0, n_train, batch_size):
+                b_idx = perm[i : i + batch_size]
+                xb = torch.from_numpy(X[b_idx])
+                db = torch.from_numpy(D[b_idx])
+                yb = torch.from_numpy(Y[b_idx])
 
-        # Validation
-        model.eval()
-        val_losses = []
-        with torch.no_grad():
-            for i in range(0, len(val_idx), 1024):
-                val_b = val_idx[i : i + 1024]
-                xb = torch.from_numpy(X[val_b])
-                db = torch.from_numpy(D[val_b])
-                yb = torch.from_numpy(Y[val_b])
+                optimizer.zero_grad()
                 qb, _ = model(xb, db)
-                val_losses.append(pinball(qb, yb, tau=0.95).item() * len(val_b))
+                loss = pinball(qb, yb, tau=0.95)
+                loss.backward()
+                optimizer.step()
+                train_losses.append(loss.item() * len(b_idx))
 
-        val_loss = sum(val_losses) / max(1, len(val_idx))
-        print(f"Epoch {epoch}/{epochs} - train_pinball: {train_loss:.4f} - val_pinball: {val_loss:.4f}")
+            train_loss = sum(train_losses) / max(1, n_train)
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-            patience_counter = 0
+            # Validation
+            model.eval()
+            val_losses = []
+            with torch.no_grad():
+                for i in range(0, len(val_idx), 1024):
+                    vb = val_idx[i : i + 1024]
+                    xb = torch.from_numpy(X[vb])
+                    db = torch.from_numpy(D[vb])
+                    yb = torch.from_numpy(Y[vb])
+                    qb, _ = model(xb, db)
+                    val_losses.append(pinball(qb, yb, tau=0.95).item() * len(vb))
+
+            val_loss = sum(val_losses) / max(1, len(val_idx))
+            print(f"[{model.__class__.__name__}] Epoch {epoch}/{epochs} - train_pinball: {train_loss:.4f} - val_pinball: {val_loss:.4f}")
+
+            if val_loss < best_val:
+                best_val = val_loss
+                best_sd = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                patience_ctr = 0
+            else:
+                patience_ctr += 1
+                if patience_ctr >= patience:
+                    break
+
+        if best_sd is not None:
+            model.load_state_dict(best_sd)
         else:
-            patience_counter += 1
-            if patience_counter >= patience:
-                break
+            best_sd = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            best_val = val_loss
 
-    if best_state_dict is not None:
-        model.load_state_dict(best_state_dict)
-    else:
-        best_state_dict = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-        best_val_loss = val_loss
+        return model, best_val, ep_run
 
-    # Save model
+    # 1. Train Attention LSTM
+    attn_model, best_val_loss, epochs_run = _train(AttnLSTM(hidden=64))
+
+    # 2. Train Plain LSTM (ablation without attention)
+    plain_model, _, _ = _train(PlainLSTM(hidden=64))
+
+    # Save attention model checkpoint
     out_p = Path(out_json)
     if model_path is None:
         if out_p.parent.name == "reports":
@@ -433,7 +572,7 @@ def demo(
     model_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
-            "state_dict": best_state_dict,
+            "state_dict": {k: v.cpu().clone() for k, v in attn_model.state_dict().items()},
             "hidden": 64,
             "t_in": 48,
             "t_out": 12,
@@ -441,8 +580,8 @@ def demo(
         model_path,
     )
 
-    # Evaluate on all test windows
-    model.eval()
+    # Evaluate Attention LSTM on all test windows
+    attn_model.eval()
     q_lstm_list = []
     attn_list = []
     with torch.no_grad():
@@ -450,7 +589,7 @@ def demo(
             tb = test_idx[i : i + 1024]
             xb = torch.from_numpy(X[tb])
             db = torch.from_numpy(D[tb])
-            qb, attnb = model(xb, db)
+            qb, attnb = attn_model(xb, db)
             q_lstm_list.append(qb.cpu().numpy())
             attn_list.append(attnb.cpu().numpy())
 
@@ -460,31 +599,110 @@ def demo(
         mean_attention = attn_all.mean(axis=(0, 1)).tolist()
     else:
         q_lstm_all = np.empty((0, 12), dtype=np.float32)
+        attn_all = np.empty((0, 12, 48), dtype=np.float32)
         mean_attention = [0.0] * 48
 
-    # Last-window P95 baseline for all test windows
+    # Evaluate Plain LSTM on all test windows
+    plain_model.eval()
+    q_plain_list = []
+    with torch.no_grad():
+        for i in range(0, len(test_idx), 1024):
+            tb = test_idx[i : i + 1024]
+            xb = torch.from_numpy(X[tb])
+            db = torch.from_numpy(D[tb])
+            qb, _ = plain_model(xb, db)
+            q_plain_list.append(qb.cpu().numpy())
+
+    if len(q_plain_list) > 0:
+        q_plain_all = np.concatenate(q_plain_list, axis=0)
+    else:
+        q_plain_all = np.empty((0, 12), dtype=np.float32)
+
+    # Attention statistics
+    attention_entropy = compute_attention_entropy(attn_all)
+
+    # Seasonal-naive base for all windows
+    seasonal_all, has_seasonal = seasonal_base(data)
+
+    # Fit calibration offsets on VALIDATION windows only (never test)
+    if len(val_idx) > 0:
+        p95_val = np.percentile(X[val_idx, :, 2], 95, axis=1, keepdims=True)
+        base_last_val = np.repeat(p95_val, 12, axis=1)
+        offset_last = fit_offset(base_last_val, Y[val_idx], tau=0.95)
+    else:
+        offset_last = 0.0
+
+    val_seasonal_mask = has_seasonal[val_idx]
+    val_seasonal_idx = val_idx[val_seasonal_mask]
+    if len(val_seasonal_idx) > 0:
+        offset_seasonal = fit_offset(seasonal_all[val_seasonal_idx], Y[val_seasonal_idx], tau=0.95)
+    else:
+        offset_seasonal = 0.0
+
+    offsets = {
+        "seasonal_naive": float(offset_seasonal),
+        "last_window": float(offset_last),
+    }
+
+    # Last-window baseline for all test windows
     if len(test_idx) > 0:
         p95_inputs = np.percentile(X[test_idx, :, 2], 95, axis=1, keepdims=True)
         q_last_all = np.repeat(p95_inputs, 12, axis=1)
+        q_last_cal_all = q_last_all + offset_last
     else:
         q_last_all = np.empty((0, 12), dtype=np.float32)
+        q_last_cal_all = np.empty((0, 12), dtype=np.float32)
 
     test_all = {
         "lstm": metrics(q_lstm_all, Y[test_idx]),
+        "lstm_noattn": metrics(q_plain_all, Y[test_idx]),
         "last_window": metrics(q_last_all, Y[test_idx]),
+        "last_window_cal": metrics(q_last_cal_all, Y[test_idx]),
     }
 
-    # ARIMA baseline on seeded test subset
-    n_arima = min(arima_windows, len(test_idx))
+    # Seasonal subset of test windows (windows with seasonal history)
+    test_seasonal_mask = has_seasonal[test_idx]
+    test_seasonal_pos = np.where(test_seasonal_mask)[0]  # position within test_idx
+    test_seasonal_idx = test_idx[test_seasonal_mask]  # window indices
+    n_seasonal_windows = len(test_seasonal_idx)
+
+    if n_seasonal_windows > 0:
+        y_seasonal = Y[test_seasonal_idx]
+        q_seasonal_sub = seasonal_all[test_seasonal_idx]
+        q_seasonal_cal_sub = q_seasonal_sub + offset_seasonal
+        test_seasonal_subset = {
+            "lstm": metrics(q_lstm_all[test_seasonal_pos], y_seasonal),
+            "lstm_noattn": metrics(q_plain_all[test_seasonal_pos], y_seasonal),
+            "seasonal_naive": metrics(q_seasonal_sub, y_seasonal),
+            "seasonal_naive_cal": metrics(q_seasonal_cal_sub, y_seasonal),
+            "last_window": metrics(q_last_all[test_seasonal_pos], y_seasonal),
+            "last_window_cal": metrics(q_last_cal_all[test_seasonal_pos], y_seasonal),
+            "n_windows": int(n_seasonal_windows),
+        }
+    else:
+        empty_m = {"pinball": 0.0, "coverage": 0.0, "mean_under": 0.0, "mean_over": 0.0}
+        test_seasonal_subset = {
+            "lstm": empty_m,
+            "lstm_noattn": empty_m,
+            "seasonal_naive": empty_m,
+            "seasonal_naive_cal": empty_m,
+            "last_window": empty_m,
+            "last_window_cal": empty_m,
+            "n_windows": 0,
+        }
+
+    # ARIMA baseline on seeded test subset chosen from windows that have seasonal history
+    n_arima = min(arima_windows, n_seasonal_windows)
     arima_failures = 0
 
     if n_arima > 0:
-        sub_indices = rng.choice(len(test_idx), size=n_arima, replace=False)
-        sub_indices.sort()
+        sub_chosen = rng.choice(n_seasonal_windows, size=n_arima, replace=False)
+        sub_chosen.sort()
+        arima_test_pos = test_seasonal_pos[sub_chosen]  # position in test_idx
+        arima_window_idx = test_seasonal_idx[sub_chosen]  # window index
         q_arima_sub = np.empty((n_arima, 12), dtype=np.float32)
 
-        for i, k in enumerate(sub_indices):
-            w_idx = test_idx[k]
+        for i, (test_k, w_idx) in enumerate(zip(arima_test_pos, arima_window_idx)):
             series = X[w_idx, :, 2]
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -504,18 +722,23 @@ def demo(
                     q_arima_sub[i] = q95
                 except Exception:
                     arima_failures += 1
-                    q_arima_sub[i] = q_last_all[k]
+                    q_arima_sub[i] = q_last_all[test_k]
 
-        y_sub = Y[test_idx[sub_indices]]
+        y_arima_sub = Y[arima_window_idx]
+        q_seasonal_cal_arima = seasonal_all[arima_window_idx] + offset_seasonal
         test_arima_subset = {
-            "lstm": metrics(q_lstm_all[sub_indices], y_sub),
-            "last_window": metrics(q_last_all[sub_indices], y_sub),
-            "arima": metrics(q_arima_sub, y_sub),
+            "lstm": metrics(q_lstm_all[arima_test_pos], y_arima_sub),
+            "lstm_noattn": metrics(q_plain_all[arima_test_pos], y_arima_sub),
+            "last_window": metrics(q_last_all[arima_test_pos], y_arima_sub),
+            "seasonal_naive_cal": metrics(q_seasonal_cal_arima, y_arima_sub),
+            "arima": metrics(q_arima_sub, y_arima_sub),
         }
     else:
         test_arima_subset = {
             "lstm": metrics(q_lstm_all, Y[test_idx]),
+            "lstm_noattn": metrics(q_plain_all, Y[test_idx]),
             "last_window": metrics(q_last_all, Y[test_idx]),
+            "seasonal_naive_cal": metrics(q_last_all, Y[test_idx]),
             "arima": metrics(q_last_all, Y[test_idx]),
         }
 
@@ -525,7 +748,6 @@ def demo(
         found = False
         for k in range(len(test_idx)):
             w = test_idx[k]
-            # Burst indicator: target peak substantially exceeds history mean
             if np.max(Y[w]) - np.mean(X[w, :, 2]) > 0.20:
                 example_k = k
                 found = True
@@ -551,7 +773,10 @@ def demo(
 
     report = {
         "test_all": test_all,
+        "test_seasonal_subset": test_seasonal_subset,
         "test_arima_subset": test_arima_subset,
+        "offsets": offsets,
+        "attention_entropy": attention_entropy,
         "n_windows": int(len(X)),
         "arima_failures": int(arima_failures),
         "epochs_run": int(epochs_run),

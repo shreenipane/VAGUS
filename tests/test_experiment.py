@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import json
 from pathlib import Path
 import subprocess
@@ -9,6 +10,7 @@ import pytest
 
 from irm.cli import main
 from irm.experiment import (
+    arm_plan,
     calibrate_iters,
     main as exp_main,
     parse_cgroup,
@@ -18,26 +20,30 @@ from irm.experiment import (
     run_loadgen,
     run_service,
     run_slo,
+    save_raw,
     summarize,
+    threshold_sensitivity,
     violation_rate,
     window_p99,
 )
 
 
 def test_rotation():
-    assert rotation(4) == [
-        ["A", "B", "C"],
-        ["B", "C", "A"],
-        ["C", "A", "B"],
-        ["A", "B", "C"],
-    ]
-    assert rotation(1) == [["A", "B", "C"]]
     assert rotation(3) == [
-        ["A", "B", "C"],
-        ["B", "C", "A"],
-        ["C", "A", "B"],
+        ["A", "B", "C", "W", "K"],
+        ["B", "C", "W", "K", "A"],
+        ["C", "W", "K", "A", "B"],
     ]
+    assert rotation(5) == [
+        ["A", "B", "C", "W", "K"],
+        ["B", "C", "W", "K", "A"],
+        ["C", "W", "K", "A", "B"],
+        ["W", "K", "A", "B", "C"],
+        ["K", "A", "B", "C", "W"],
+    ]
+    assert rotation(1) == [["A", "B", "C", "W", "K"]]
     assert rotation(0) == []
+    assert rotation(2, arms=["A", "B", "C"]) == [["A", "B", "C"], ["B", "C", "A"]]
 
 
 def test_percentiles_1_to_100():
@@ -134,6 +140,11 @@ def test_summarize_hand_made_runs():
     assert res["C"]["cpuhog_ips"] == pytest.approx(500.0)
     assert res["C"]["errors"] == 0
 
+    assert "rep_violation_rates" in res["A"]
+    assert len(res["A"]["rep_violation_rates"]) == 2
+    assert "threshold_sensitivity" in res["A"]
+    assert set(res["A"]["threshold_sensitivity"].keys()) == {"1.5x", "2x", "3x"}
+
 
 def test_calibrate_iters():
     iters = calibrate_iters()
@@ -191,14 +202,14 @@ def test_cli_help(capsys):
 @pytest.mark.live
 def test_run_slo_live(tmp_path):
     out_file = tmp_path / "slo.json"
-    res = run_slo(out_file, minutes=0.1, reps=1, rate=20)
+    res = run_slo(out_file, minutes=0.1, reps=1, rate=20, raw_dir=tmp_path / "raw")
     assert out_file.is_file()
     assert "slo_target_ms" in res
     assert "conditions" in res
 
 
 def test_run_slo_revert_on_apply_failure(monkeypatch, tmp_path):
-    monkeypatch.setattr("irm.experiment.rotation", lambda reps: [["C"]])
+    monkeypatch.setattr("irm.experiment.rotation", lambda reps, **kwargs: [["C"]])
 
     class DummyProc:
         pid = 1234
@@ -223,7 +234,7 @@ def test_run_slo_revert_on_apply_failure(monkeypatch, tmp_path):
 
     out_file = tmp_path / "slo.json"
     with pytest.raises(RuntimeError, match="apply error"):
-        run_slo(out_file, minutes=0.1, reps=1)
+        run_slo(out_file, minutes=0.1, reps=1, raw_dir=tmp_path / "raw")
 
     assert len(revert_calls) >= 1
 
@@ -241,7 +252,7 @@ def test_cpuhog_delay(tmp_path):
 
 
 def test_cleanup_resets_failed_units(monkeypatch, tmp_path):
-    monkeypatch.setattr("irm.experiment.rotation", lambda reps: [["B", "C"]])
+    monkeypatch.setattr("irm.experiment.rotation", lambda reps, **kwargs: [["B", "C"]])
 
     class DummyProc:
         pid = 1234
@@ -276,9 +287,10 @@ def test_cleanup_resets_failed_units(monkeypatch, tmp_path):
     monkeypatch.setattr("subprocess.Popen", fake_popen)
 
     out_file = tmp_path / "slo.json"
-    res = run_slo(out_file, minutes=0.1, reps=1, rate=20)
+    res = run_slo(out_file, minutes=0.1, reps=1, rate=20, raw_dir=tmp_path / "raw")
 
     assert res["conditions"]["C"]["cpuhog_ips"] == pytest.approx(5000.0)
+    assert (tmp_path / "raw" / "rep0_B.json.gz").is_file() and (tmp_path / "raw" / "rep0_C.json.gz").is_file()
 
     stop_units = [cmd[3] for cmd in subprocess_calls if cmd[:3] == ["systemctl", "--user", "stop"]]
     reset_units = [cmd[3] for cmd in subprocess_calls if cmd[:3] == ["systemctl", "--user", "reset-failed"]]
@@ -289,5 +301,117 @@ def test_cleanup_resets_failed_units(monkeypatch, tmp_path):
     for i, cmd in enumerate(subprocess_calls[:-1]):
         if cmd[:3] == ["systemctl", "--user", "stop"]:
             assert subprocess_calls[i + 1] == ["systemctl", "--user", "reset-failed", cmd[3]]
+
+
+def test_arm_plan():
+    srv_cg = "/user.slice/app.slice/irm-exp-service-1.scope"
+    hog_cg = "/user.slice/app.slice/irm-exp-cpuhog-1.scope"
+    recs = {
+        "ncpu": 4,
+        "items": [
+            {
+                "cgroup": srv_cg,
+                "cpu_max": "max",
+                "memory_high": None,
+                "cpu_weight": 1000,
+            },
+            {
+                "cgroup": hog_cg,
+                "cpu_max": "100000 100000",
+                "memory_high": 104857600,
+                "cpu_weight": None,
+            },
+        ],
+        "skipped": [],
+        "pairs": [],
+    }
+
+    # Arm C: all recs items
+    plan_c = arm_plan("C", recs, srv_cg)
+    assert len(plan_c["items"]) == 2
+    assert plan_c["items"] == recs["items"]
+    assert plan_c["ncpu"] == 4
+    assert isinstance(plan_c["generated_at"], int)
+
+    # Arm K: recs items except the service's
+    plan_k = arm_plan("K", recs, srv_cg)
+    assert len(plan_k["items"]) == 1
+    assert plan_k["items"][0]["cgroup"] == hog_cg
+    assert plan_k["ncpu"] == 4
+    assert isinstance(plan_k["generated_at"], int)
+
+    # Arm W: exactly one item with service_cg and only cpu_weight (no recommend call)
+    plan_w = arm_plan("W", None, srv_cg)
+    assert len(plan_w["items"]) == 1
+    w_item = plan_w["items"][0]
+    assert w_item["cgroup"] == srv_cg
+    assert w_item["cpu_weight"] == 1000
+    assert w_item["cpu_max"] is None
+    assert w_item["memory_high"] is None
+    assert isinstance(plan_w["generated_at"], int)
+
+
+def test_loadgen_warmup():
+    ready_event = threading.Event()
+    stop_event = threading.Event()
+    server_port: list[int] = []
+
+    def run_server_thread():
+        def on_ready(p):
+            server_port.append(p)
+            ready_event.set()
+
+        asyncio.run(run_service(port=0, ready_fn=on_ready, stop_event=stop_event))
+
+    t = threading.Thread(target=run_server_thread, daemon=True)
+    t.start()
+    try:
+        assert ready_event.wait(timeout=5.0), "Service did not start in time"
+        port = server_port[0]
+        result = asyncio.run(
+            run_loadgen(port=port, rate=50.0, seconds=1.0, warmup=0.5, seed=42)
+        )
+        assert result["errors"] == 0
+        assert len(result["records"]) > 0
+        offsets = [r[0] for r in result["records"]]
+        assert min(offsets) >= 0.0
+        assert max(offsets) <= 1.0 + 0.1
+    finally:
+        stop_event.set()
+        t.join(timeout=3.0)
+
+
+def test_save_raw_roundtrip(tmp_path):
+    out_file = tmp_path / "raw.json.gz"
+    records = [[0.1, 12.5], [0.5, 15.0], [1.2, 18.2]]
+    errors = 1
+    meta = {"rep": 0, "arm": "C", "rate": 200, "apply_late": False}
+
+    save_raw(out_file, records, errors, meta)
+    assert out_file.is_file()
+
+    with gzip.open(out_file, "rt", encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert data["records"] == records
+    assert data["errors"] == errors
+    assert data["meta"] == meta
+
+
+def test_threshold_sensitivity():
+    windows = [12.0, 18.0, 25.0, 35.0]
+    sens = threshold_sensitivity(windows, a_p99=10.0)
+    assert sens["1.5x"] == pytest.approx(3 / 4)
+    assert sens["2x"] == pytest.approx(2 / 4)
+    assert sens["3x"] == pytest.approx(1 / 4)
+
+    assert threshold_sensitivity([], a_p99=10.0) == {"1.5x": 0.0, "2x": 0.0, "3x": 0.0}
+    assert threshold_sensitivity([10.0], a_p99=0.0) == {"1.5x": 0.0, "2x": 0.0, "3x": 0.0}
+
+
+def test_run_slo_requires_arm_a(tmp_path):
+    out_file = tmp_path / "slo.json"
+    with pytest.raises(ValueError, match="arm 'A' must be in arms"):
+        run_slo(out_file, arms=("B", "C", "W", "K"), raw_dir=tmp_path / "raw")
 
 

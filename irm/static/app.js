@@ -356,19 +356,89 @@ function renderPlan(recs) {
   const tbody = document.getElementById("recs-tbody");
   const pairsSection = document.getElementById("pairs-section");
   const pairsTbody = document.getElementById("pairs-tbody");
+  const planAge = document.getElementById("plan-age");
+  const staleWarning = document.getElementById("plan-stale-warning");
 
   clearElement(tbody);
   clearElement(pairsTbody);
 
   if (!recs || !recs.items || recs.items.length === 0) {
     tableWrapper.classList.add("hidden");
+    tableWrapper.classList.remove("dimmed");
     placeholder.classList.remove("hidden");
     pairsSection.classList.add("hidden");
+    if (planAge) planAge.classList.add("hidden");
+    if (staleWarning) staleWarning.classList.add("hidden");
     return;
   }
 
   tableWrapper.classList.remove("hidden");
   placeholder.classList.add("hidden");
+
+  // Show the plan's age from generated_at (epoch or ISO);
+  // if older than 15 minutes show "stale plan — regenerate with irm recommend" and dim the table.
+  let isStale = false;
+  let ageText = "";
+  if (recs.generated_at != null) {
+    let genTimeMs = null;
+    if (typeof recs.generated_at === "number") {
+      genTimeMs = recs.generated_at * 1000;
+    } else if (typeof recs.generated_at === "string") {
+      if (!isNaN(Number(recs.generated_at)) && recs.generated_at.trim() !== "") {
+        genTimeMs = Number(recs.generated_at) * 1000;
+      } else {
+        const d = new Date(recs.generated_at);
+        if (!isNaN(d.getTime())) {
+          genTimeMs = d.getTime();
+        }
+      }
+    }
+
+    if (genTimeMs != null) {
+      const nowMs = Date.now();
+      const diffMs = Math.max(0, nowMs - genTimeMs);
+      const diffMin = Math.floor(diffMs / 60000);
+      const diffSec = Math.floor((diffMs % 60000) / 1000);
+      if (diffMin >= 60) {
+        const diffHours = Math.floor(diffMin / 60);
+        ageText = `Plan age: ${diffHours}h ${diffMin % 60}m`;
+      } else if (diffMin > 0) {
+        ageText = `Plan age: ${diffMin}m ${diffSec}s`;
+      } else {
+        ageText = `Plan age: ${diffSec}s`;
+      }
+
+      if (diffMs > 15 * 60 * 1000) {
+        isStale = true;
+      }
+    } else {
+      isStale = true;
+      ageText = "Plan age: unknown";
+    }
+  } else {
+    isStale = true;
+    ageText = "Plan age: unknown";
+  }
+
+  if (planAge) {
+    planAge.textContent = ageText;
+    planAge.classList.remove("hidden");
+  }
+
+  if (staleWarning) {
+    if (isStale) {
+      staleWarning.textContent = "stale plan \u2014 regenerate with irm recommend";
+      staleWarning.classList.remove("hidden");
+    } else {
+      staleWarning.classList.add("hidden");
+    }
+  }
+
+  if (isStale) {
+    tableWrapper.classList.add("dimmed");
+  } else {
+    tableWrapper.classList.remove("dimmed");
+  }
 
   recs.items.forEach((item) => {
     const tr = document.createElement("tr");
@@ -430,6 +500,7 @@ function renderPlan(recs) {
   }
 }
 
+
 function renderAnalyse(reports) {
   // Overhead line
   const overheadLine = document.getElementById("overhead-line");
@@ -441,11 +512,61 @@ function renderAnalyse(reports) {
     overheadLine.textContent = "Monitor overhead: N/A";
   }
 
+  const forecast = reports ? reports.forecast : null;
+
+  // Seasonal Subset table (above the existing tables)
+  const seasonalSec = document.getElementById("forecast-seasonal-section");
+  const seasonalTbody = document.getElementById("forecast-seasonal-tbody");
+  if (seasonalTbody) clearElement(seasonalTbody);
+
+  const seasonalModels = {
+    lstm: "LSTM",
+    lstm_noattn: "LSTM (no attn)",
+    seasonal_naive: "Seasonal Naive",
+    seasonal_naive_cal: "Seasonal Naive (cal)",
+    last_window: "Last Window",
+    last_window_cal: "Last Window (cal)",
+  };
+
+  if (forecast && forecast.test_seasonal_subset) {
+    const sSubset = forecast.test_seasonal_subset;
+    const sKeys = Object.keys(sSubset).filter((k) => k !== "n_windows" && typeof sSubset[k] === "object" && sSubset[k] !== null);
+    if (sKeys.length > 0 && seasonalSec && seasonalTbody) {
+      seasonalSec.classList.remove("hidden");
+      // Render in preferred order if present, plus any other keys
+      const preferred = ["lstm", "lstm_noattn", "seasonal_naive", "seasonal_naive_cal", "last_window", "last_window_cal"];
+      const orderedKeys = preferred.filter((k) => sKeys.includes(k)).concat(sKeys.filter((k) => !preferred.includes(k)));
+
+      orderedKeys.forEach((key) => {
+        const m = sSubset[key];
+        const tr = document.createElement("tr");
+
+        const tdModel = document.createElement("td");
+        tdModel.textContent = seasonalModels[key] || key;
+
+        const tdPinball = document.createElement("td");
+        tdPinball.textContent = m.pinball != null ? (typeof m.pinball === "number" ? m.pinball.toFixed(4) : m.pinball) : "-";
+
+        const tdCoverage = document.createElement("td");
+        tdCoverage.textContent = m.coverage != null ? (typeof m.coverage === "number" ? (m.coverage * 100).toFixed(1) + "%" : m.coverage) : "-";
+
+        tr.appendChild(tdModel);
+        tr.appendChild(tdPinball);
+        tr.appendChild(tdCoverage);
+
+        seasonalTbody.appendChild(tr);
+      });
+    } else if (seasonalSec) {
+      seasonalSec.classList.add("hidden");
+    }
+  } else if (seasonalSec) {
+    seasonalSec.classList.add("hidden");
+  }
+
   // Forecast table
   const forecastTbody = document.getElementById("forecast-tbody");
   clearElement(forecastTbody);
 
-  const forecast = reports ? reports.forecast : null;
   const forecastRows = [];
 
   if (forecast) {
@@ -453,12 +574,26 @@ function renderAnalyse(reports) {
       if (forecast.test_all.lstm) {
         forecastRows.push({ name: "LSTM", metrics: forecast.test_all.lstm });
       }
+      if (forecast.test_all.lstm_noattn) {
+        forecastRows.push({ name: "LSTM (no attn)", metrics: forecast.test_all.lstm_noattn });
+      }
       if (forecast.test_all.last_window) {
         forecastRows.push({ name: "Last Window", metrics: forecast.test_all.last_window });
       }
+      if (forecast.test_all.last_window_cal) {
+        forecastRows.push({ name: "Last Window (cal)", metrics: forecast.test_all.last_window_cal });
+      }
     }
-    if (forecast.test_arima_subset && forecast.test_arima_subset.arima) {
-      forecastRows.push({ name: "ARIMA", metrics: forecast.test_arima_subset.arima });
+    if (forecast.test_arima_subset) {
+      if (forecast.test_arima_subset.arima) {
+        forecastRows.push({ name: "ARIMA", metrics: forecast.test_arima_subset.arima });
+      }
+      if (forecast.test_arima_subset.seasonal_naive_cal) {
+        forecastRows.push({ name: "Seasonal Naive (cal, subset)", metrics: forecast.test_arima_subset.seasonal_naive_cal });
+      }
+      if (forecast.test_arima_subset.lstm_noattn) {
+        forecastRows.push({ name: "LSTM (no attn, subset)", metrics: forecast.test_arima_subset.lstm_noattn });
+      }
     }
   }
 
@@ -470,14 +605,14 @@ function renderAnalyse(reports) {
       tdModel.textContent = r.name;
 
       const tdPinball = document.createElement("td");
-      tdPinball.textContent = r.metrics.pinball != null ? r.metrics.pinball.toFixed(4) : "-";
+      tdPinball.textContent = r.metrics.pinball != null ? (typeof r.metrics.pinball === "number" ? r.metrics.pinball.toFixed(4) : r.metrics.pinball) : "-";
 
       const tdCoverage = document.createElement("td");
-      tdCoverage.textContent = r.metrics.coverage != null ? (r.metrics.coverage * 100).toFixed(1) + "%" : "-";
+      tdCoverage.textContent = r.metrics.coverage != null ? (typeof r.metrics.coverage === "number" ? (r.metrics.coverage * 100).toFixed(1) + "%" : r.metrics.coverage) : "-";
 
       const tdUnder = document.createElement("td");
       const underVal = r.metrics.mean_under != null ? r.metrics.mean_under : r.metrics.mean_under_prediction;
-      tdUnder.textContent = underVal != null ? underVal.toFixed(4) : "-";
+      tdUnder.textContent = underVal != null ? (typeof underVal === "number" ? underVal.toFixed(4) : underVal) : "-";
 
       tr.appendChild(tdModel);
       tr.appendChild(tdPinball);
@@ -494,6 +629,20 @@ function renderAnalyse(reports) {
     td.textContent = "No forecast data";
     tr.appendChild(td);
     forecastTbody.appendChild(tr);
+  }
+
+  // Attention entropy line
+  const aeLine = document.getElementById("attention-entropy-line");
+  if (aeLine) {
+    if (forecast && forecast.attention_entropy) {
+      const ae = forecast.attention_entropy;
+      const meanStr = ae.mean != null ? (typeof ae.mean === "number" ? ae.mean.toFixed(2) : ae.mean) : "-";
+      const uniformStr = ae.uniform != null ? (typeof ae.uniform === "number" ? ae.uniform.toFixed(2) : ae.uniform) : "-";
+      aeLine.textContent = `attention entropy ${meanStr} vs uniform ${uniformStr}`;
+      aeLine.classList.remove("hidden");
+    } else {
+      aeLine.classList.add("hidden");
+    }
   }
 
   // Placement table
@@ -560,6 +709,7 @@ function renderAnalyse(reports) {
     exampleSec.classList.add("hidden");
   }
 }
+
 
 function createForecastExampleSvg(ex) {
   const width = 480;
@@ -685,13 +835,18 @@ function formatMeanCi(stat, decimals, isPercent) {
 function renderSlo(slo) {
   const placeholder = document.getElementById("slo-placeholder");
   const content = document.getElementById("slo-content");
+  const lateWarning = document.getElementById("slo-late-warning");
   const targetEl = document.getElementById("slo-target");
   const tbody = document.getElementById("slo-tbody");
+  const sensSection = document.getElementById("slo-sensitivity-section");
+  const sensHeaderRow = document.getElementById("slo-sensitivity-header-row");
+  const sensTbody = document.getElementById("slo-sensitivity-tbody");
   const planSection = document.getElementById("slo-plan-section");
   const planTbody = document.getElementById("slo-plan-tbody");
 
   clearElement(tbody);
-  clearElement(planTbody);
+  if (sensTbody) clearElement(sensTbody);
+  if (planTbody) clearElement(planTbody);
 
   if (!slo) {
     if (placeholder) placeholder.classList.remove("hidden");
@@ -702,92 +857,121 @@ function renderSlo(slo) {
   if (placeholder) placeholder.classList.add("hidden");
   if (content) content.classList.remove("hidden");
 
-  // Above it: "SLO target: X ms (2 × p99 alone) · N reps × M min at R rps"
-  const targetMs = slo.slo_target_ms != null ? (typeof slo.slo_target_ms === "number" ? slo.slo_target_ms.toFixed(2) : slo.slo_target_ms) : "-";
-  const reps = slo.reps != null ? slo.reps : "-";
-  const min = slo.minutes != null ? slo.minutes : "-";
-  const rate = slo.rate != null ? slo.rate : "-";
+  // Warning line if apply_late_runs is non-empty
+  if (lateWarning) {
+    if (Array.isArray(slo.apply_late_runs) && slo.apply_late_runs.length > 0) {
+      lateWarning.textContent = "Warning: plan application completed late in runs: " + slo.apply_late_runs.join(", ");
+      lateWarning.classList.remove("hidden");
+    } else {
+      lateWarning.classList.add("hidden");
+    }
+  }
+
+  // Caption with metric definition, target, iters and warm-up
+  const metricStr = slo.metric || "p99 latency";
+  const targetStr = slo.slo_target_ms != null ? (typeof slo.slo_target_ms === "number" ? slo.slo_target_ms.toFixed(2) + " ms" : slo.slo_target_ms + " ms") : "-";
+  const itersVal = slo.iters != null ? slo.iters : (slo.reps != null ? `${slo.reps} reps` : "-");
+  const warmupVal = slo.warmup_s != null ? `${slo.warmup_s}s` : (slo.warmup != null ? `${slo.warmup}s` : "-");
   if (targetEl) {
-    targetEl.textContent = `SLO target: ${targetMs} ms (2 \u00d7 p99 alone) \u00b7 ${reps} reps \u00d7 ${min} min at ${rate} rps`;
+    targetEl.textContent = `Metric: ${metricStr} \u00b7 Target: ${targetStr} \u00b7 Iters: ${itersVal} \u00b7 Warm-up: ${warmupVal}`;
   }
 
   const conditions = slo.conditions || {};
+  const armLabels = {
+    A: "A (alone)",
+    B: "B (co-located)",
+    W: "W (co-located + weight only)",
+    K: "K (co-located + caps only)",
+    C: "C (co-located + irm (weight + caps))",
+  };
 
-  // Highlight lowest p99 among B and C
-  const bP99 = conditions.B && conditions.B.p99_ms != null ? conditions.B.p99_ms : null;
-  const cP99 = conditions.C && conditions.C.p99_ms != null ? conditions.C.p99_ms : null;
-  let lowestCond = null;
-  if (bP99 != null && cP99 != null) {
-    if (cP99 < bP99) {
-      lowestCond = "C";
-    } else if (bP99 < cP99) {
-      lowestCond = "B";
-    } else {
-      lowestCond = "both";
+  const armOrder = ["A", "B", "W", "K", "C"];
+  const condKeys = Object.keys(conditions);
+  const presentArms = armOrder.filter((arm) => condKeys.includes(arm)).concat(condKeys.filter((arm) => !armOrder.includes(arm)));
+
+  // Find lowest p99 among arms (prefer arms with interference/remediation: B, W, K, C)
+  let lowestArm = null;
+  let lowestVal = Infinity;
+  const candidateArms = presentArms.filter((arm) => arm !== "A");
+  const armsToCheck = candidateArms.length > 0 ? candidateArms : presentArms;
+  armsToCheck.forEach((arm) => {
+    const p99 = conditions[arm]?.p99_ms;
+    if (typeof p99 === "number" && p99 < lowestVal) {
+      lowestVal = p99;
+      lowestArm = arm;
     }
-  } else if (bP99 != null) {
-    lowestCond = "B";
-  } else if (cP99 != null) {
-    lowestCond = "C";
-  }
-
-  const condRows = [
-    { key: "A", label: "A (alone)" },
-    { key: "B", label: "B (co-located)" },
-    { key: "C", label: "C (co-located + irm)" },
-  ];
+  });
 
   if (tbody) {
-    condRows.forEach(({ key, label }) => {
-      const c = conditions[key] || {};
+    presentArms.forEach((arm) => {
+      const c = conditions[arm] || {};
       const tr = document.createElement("tr");
-      tr.setAttribute("data-condition", key);
+      tr.setAttribute("data-condition", arm);
+      tr.setAttribute("data-arm", arm);
 
-      const tdCond = document.createElement("td");
-      tdCond.textContent = label;
+      const tdArm = document.createElement("td");
+      tdArm.textContent = armLabels[arm] || arm;
 
       const tdP50 = document.createElement("td");
       tdP50.textContent = c.p50_ms != null ? (typeof c.p50_ms === "number" ? c.p50_ms.toFixed(2) : c.p50_ms) : "-";
 
-      const tdP95 = document.createElement("td");
-      tdP95.textContent = c.p95_ms != null ? (typeof c.p95_ms === "number" ? c.p95_ms.toFixed(2) : c.p95_ms) : "-";
-
       const tdP99 = document.createElement("td");
       tdP99.textContent = c.p99_ms != null ? (typeof c.p99_ms === "number" ? c.p99_ms.toFixed(2) : c.p99_ms) : "-";
-      if ((key === "B" || key === "C") && (lowestCond === key || lowestCond === "both")) {
+      if (arm === lowestArm) {
         tdP99.classList.add("highlight");
         tdP99.classList.add("lowest-p99");
         tdP99.setAttribute("title", "Lowest p99");
       }
 
       const tdRange = document.createElement("td");
-      if (c.rep_p99_ms) {
-        const rMin = c.rep_p99_ms.min != null ? c.rep_p99_ms.min : (Array.isArray(c.rep_p99_ms) ? c.rep_p99_ms[0] : null);
-        const rMax = c.rep_p99_ms.max != null ? c.rep_p99_ms.max : (Array.isArray(c.rep_p99_ms) ? c.rep_p99_ms[c.rep_p99_ms.length - 1] : null);
-        if (rMin != null && rMax != null) {
-          const minStr = typeof rMin === "number" ? rMin.toFixed(2) : rMin;
-          const maxStr = typeof rMax === "number" ? rMax.toFixed(2) : rMax;
-          tdRange.textContent = `${minStr}\u2013${maxStr}`;
+      if (c.rep_p99_ms != null) {
+        if (Array.isArray(c.rep_p99_ms)) {
+          if (c.rep_p99_ms.length > 0) {
+            const rMin = Math.min(...c.rep_p99_ms);
+            const rMax = Math.max(...c.rep_p99_ms);
+            tdRange.textContent = `${rMin.toFixed(2)}\u2013${rMax.toFixed(2)}`;
+          } else {
+            tdRange.textContent = "-";
+          }
+        } else if (typeof c.rep_p99_ms === "object") {
+          const rMin = c.rep_p99_ms.min;
+          const rMax = c.rep_p99_ms.max;
+          if (rMin != null && rMax != null) {
+            const minStr = typeof rMin === "number" ? rMin.toFixed(2) : rMin;
+            const maxStr = typeof rMax === "number" ? rMax.toFixed(2) : rMax;
+            tdRange.textContent = `${minStr}\u2013${maxStr}`;
+          } else {
+            tdRange.textContent = "-";
+          }
         } else {
-          tdRange.textContent = "-";
+          tdRange.textContent = String(c.rep_p99_ms);
         }
       } else {
         tdRange.textContent = "-";
       }
 
       const tdViol = document.createElement("td");
-      tdViol.textContent = c.violation_rate != null ? (typeof c.violation_rate === "number" ? (c.violation_rate * 100).toFixed(1) + "%" : c.violation_rate) : "-";
-
-      const tdCpuhog = document.createElement("td");
-      if (key === "A") {
-        tdCpuhog.textContent = "\u2014"; // em-dash for A
+      if (c.violation_rate != null) {
+        if (typeof c.violation_rate === "number") {
+          tdViol.textContent = (c.violation_rate * 100).toFixed(1) + "%";
+        } else {
+          tdViol.textContent = c.violation_rate;
+        }
       } else {
-        tdCpuhog.textContent = c.cpuhog_ips != null ? (typeof c.cpuhog_ips === "number" ? c.cpuhog_ips.toFixed(1) : c.cpuhog_ips) : "-";
+        tdViol.textContent = "-";
       }
 
-      tr.appendChild(tdCond);
+      const tdCpuhog = document.createElement("td");
+      if (arm === "A") {
+        tdCpuhog.textContent = "\u2014"; // em-dash for alone
+      } else if (c.cpuhog_ips != null) {
+        tdCpuhog.textContent = typeof c.cpuhog_ips === "number" ? c.cpuhog_ips.toFixed(1) : c.cpuhog_ips;
+      } else {
+        tdCpuhog.textContent = "-";
+      }
+
+      tr.appendChild(tdArm);
       tr.appendChild(tdP50);
-      tr.appendChild(tdP95);
       tr.appendChild(tdP99);
       tr.appendChild(tdRange);
       tr.appendChild(tdViol);
@@ -797,12 +981,122 @@ function renderSlo(slo) {
     });
   }
 
-  // Below it: the applied_plan items (cgroup short name, cpu.max, cpu.weight)
+  // Small table of threshold sensitivity per arm
+  if (sensSection && sensHeaderRow && sensTbody) {
+    const allSensKeys = [];
+    presentArms.forEach((arm) => {
+      const sens = conditions[arm]?.threshold_sensitivity;
+      if (sens && typeof sens === "object") {
+        Object.keys(sens).forEach((k) => {
+          if (!allSensKeys.includes(k)) {
+            allSensKeys.push(k);
+          }
+        });
+      }
+    });
+
+    if (allSensKeys.length > 0) {
+      sensSection.classList.remove("hidden");
+      // Sort keys naturally (numeric prefix order, e.g. 1.5x, 2x, 3x)
+      allSensKeys.sort((a, b) => {
+        const numA = parseFloat(a);
+        const numB = parseFloat(b);
+        if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+        return a.localeCompare(b);
+      });
+
+      // Reset and build header row
+      clearElement(sensHeaderRow);
+      const thArm = document.createElement("th");
+      thArm.textContent = "Arm";
+      sensHeaderRow.appendChild(thArm);
+      allSensKeys.forEach((k) => {
+        const th = document.createElement("th");
+        th.textContent = k;
+        sensHeaderRow.appendChild(th);
+      });
+
+      // Build tbody
+      presentArms.forEach((arm) => {
+        const sens = conditions[arm]?.threshold_sensitivity;
+        const tr = document.createElement("tr");
+
+        const tdArm = document.createElement("td");
+        tdArm.textContent = armLabels[arm] || arm;
+        tr.appendChild(tdArm);
+
+        allSensKeys.forEach((k) => {
+          const tdVal = document.createElement("td");
+          const val = sens ? sens[k] : null;
+          if (val == null) {
+            tdVal.textContent = "-";
+          } else if (typeof val === "number") {
+            if (val >= 0 && val <= 1) {
+              tdVal.textContent = (val * 100).toFixed(1) + "%";
+            } else {
+              tdVal.textContent = val.toFixed(2);
+            }
+          } else {
+            tdVal.textContent = String(val);
+          }
+          tr.appendChild(tdVal);
+        });
+
+        sensTbody.appendChild(tr);
+      });
+    } else {
+      sensSection.classList.add("hidden");
+    }
+  }
+
+  // Applied plans per arm (cgroup short name, cpu.max, cpu.weight)
+  // Legacy files (A/B/C only, applied_plan) still render.
   if (planSection && planTbody) {
-    if (Array.isArray(slo.applied_plan) && slo.applied_plan.length > 0) {
-      planSection.classList.remove("hidden");
+    let hasPlans = false;
+
+    if (slo.applied_plans && typeof slo.applied_plans === "object") {
+      const planArms = Object.keys(slo.applied_plans);
+      const planArmOrder = ["C", "W", "K"].filter((a) => planArms.includes(a)).concat(planArms.filter((a) => !["C", "W", "K"].includes(a)));
+
+      planArmOrder.forEach((arm) => {
+        const items = slo.applied_plans[arm];
+        if (Array.isArray(items) && items.length > 0) {
+          hasPlans = true;
+          items.forEach((item) => {
+            const tr = document.createElement("tr");
+
+            const tdArm = document.createElement("td");
+            tdArm.textContent = arm;
+
+            const shortName = (item.cgroup || "").split("/").filter(Boolean).pop() || item.cgroup || "-";
+            const tdCg = document.createElement("td");
+            tdCg.textContent = shortName;
+            if (item.cgroup) {
+              tdCg.setAttribute("title", item.cgroup);
+            }
+
+            const tdMax = document.createElement("td");
+            tdMax.textContent = item["cpu.max"] != null ? item["cpu.max"] : (item.cpu_max != null ? item.cpu_max : "-");
+
+            const tdWeight = document.createElement("td");
+            tdWeight.textContent = item["cpu.weight"] != null ? item["cpu.weight"] : (item.cpu_weight != null ? item.cpu_weight : "-");
+
+            tr.appendChild(tdArm);
+            tr.appendChild(tdCg);
+            tr.appendChild(tdMax);
+            tr.appendChild(tdWeight);
+
+            planTbody.appendChild(tr);
+          });
+        }
+      });
+    } else if (Array.isArray(slo.applied_plan) && slo.applied_plan.length > 0) {
+      hasPlans = true;
       slo.applied_plan.forEach((item) => {
         const tr = document.createElement("tr");
+
+        const tdArm = document.createElement("td");
+        tdArm.textContent = "C";
 
         const shortName = (item.cgroup || "").split("/").filter(Boolean).pop() || item.cgroup || "-";
         const tdCg = document.createElement("td");
@@ -817,12 +1111,17 @@ function renderSlo(slo) {
         const tdWeight = document.createElement("td");
         tdWeight.textContent = item["cpu.weight"] != null ? item["cpu.weight"] : (item.cpu_weight != null ? item.cpu_weight : "-");
 
+        tr.appendChild(tdArm);
         tr.appendChild(tdCg);
         tr.appendChild(tdMax);
         tr.appendChild(tdWeight);
 
         planTbody.appendChild(tr);
       });
+    }
+
+    if (hasPlans) {
+      planSection.classList.remove("hidden");
     } else {
       planSection.classList.add("hidden");
     }
@@ -846,17 +1145,27 @@ function renderPlacementStudy(study) {
   if (placeholder) placeholder.classList.add("hidden");
   if (content) content.classList.remove("hidden");
 
-  // Caption: "N seeds · util ×U · host slack ×S"
+  // Caption: "N seeds · util ×U · host slack ×S · CI: method"
   const nSeeds = Array.isArray(study.seeds) ? study.seeds.length : (study.seeds != null ? study.seeds : "-");
   const uStr = study.util_scale != null ? (typeof study.util_scale === "number" ? study.util_scale.toFixed(1) : study.util_scale) : "-";
   const sStr = study.host_slack != null ? (typeof study.host_slack === "number" ? (Number.isInteger(study.host_slack) ? study.host_slack.toString() : study.host_slack.toFixed(1)) : study.host_slack) : "-";
+  const ciMethod = study.ci_method || "z";
   if (captionEl) {
-    captionEl.textContent = `${nSeeds} seeds \u00b7 util \u00d7${uStr} \u00b7 host slack \u00d7${sStr}`;
+    captionEl.textContent = `${nSeeds} seeds \u00b7 util \u00d7${uStr} \u00b7 host slack \u00d7${sStr} \u00b7 CI: ${ciMethod}`;
   }
 
-  // Rows FirstFit, BestFit, DQN, DQN_noK
-  const policies = ["FirstFit", "BestFit", "DQN", "DQN_noK"];
+  // Iterate over whatever policies exist in summary
   const summary = study.summary || {};
+  const preferred = [
+    "FirstFit",
+    "BestFit",
+    "ForecastFirstFit_0.8",
+    "ForecastBestFit_1.0",
+    "DQN",
+    "DQN_noK",
+  ];
+  const summaryKeys = Object.keys(summary);
+  const policies = preferred.filter((p) => summaryKeys.includes(p)).concat(summaryKeys.filter((p) => !preferred.includes(p)));
 
   if (tbody) {
     policies.forEach((pol) => {

@@ -141,6 +141,58 @@ class BestFit(Policy):
         return int(tie_indices[best_sub])
 
 
+class ForecastBestFit(Policy):
+    """ForecastBestFit: among candidates with post_q95_frac <= cap, choose highest
+
+    host_alloc_frac after placement (ties -> lowest host id); if none qualifies,
+    choose lowest post_q95_frac.
+    """
+
+    def __init__(self, cap: float = 1.0):
+        self.cap = float(cap)
+
+    def choose(self, features: np.ndarray, host_ids: list[int]) -> int:
+        if len(host_ids) == 0:
+            return 0
+        post_q95 = features[:, 13]
+        qualifies = np.where(post_q95 <= self.cap + 1e-6)[0]
+        if len(qualifies) > 0:
+            post_alloc = features[:, 1] + features[:, 5]
+            cand_post_alloc = post_alloc[qualifies]
+            max_val = float(np.max(cand_post_alloc))
+            tie_indices = qualifies[np.where(np.abs(cand_post_alloc - max_val) < 1e-6)[0]]
+            best_sub = int(np.argmin([host_ids[i] for i in tie_indices]))
+            return int(tie_indices[best_sub])
+        min_val = float(np.min(post_q95))
+        tie_indices = np.where(np.abs(post_q95 - min_val) < 1e-6)[0]
+        best_sub = int(np.argmin([host_ids[i] for i in tie_indices]))
+        return int(tie_indices[best_sub])
+
+
+class ForecastFirstFit(Policy):
+    """ForecastFirstFit: lowest host id with post_q95_frac <= cap;
+
+    if none qualifies, choose lowest post_q95_frac.
+    """
+
+    def __init__(self, cap: float = 0.8):
+        self.cap = float(cap)
+
+    def choose(self, features: np.ndarray, host_ids: list[int]) -> int:
+        if len(host_ids) == 0:
+            return 0
+        post_q95 = features[:, 13]
+        qualifies = np.where(post_q95 <= self.cap + 1e-6)[0]
+        if len(qualifies) > 0:
+            best_idx = int(np.argmin([host_ids[i] for i in qualifies]))
+            return int(qualifies[best_idx])
+        min_val = float(np.min(post_q95))
+        tie_indices = np.where(np.abs(post_q95 - min_val) < 1e-6)[0]
+        best_sub = int(np.argmin([host_ids[i] for i in tie_indices]))
+        return int(tie_indices[best_sub])
+
+
+
 class PendingDecision:
     def __init__(self, dec_id: int, t_d: int, host: int, s: np.ndarray, r_imm: float):
         self.dec_id = dec_id

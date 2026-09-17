@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import shutil
+import sqlite3
 import pytest
 from irm import monitor
 from irm.cli import main
@@ -354,6 +355,9 @@ def test_cli_subcommands(tmp_path, make_cgroup, make_proc, monkeypatch):
         cpu_stat="usage_usec 1000000\n",
     )
 
+    monkeypatch.setattr("irm.cli.run", monitor.run, raising=False)
+    monkeypatch.setattr("irm.cli.bench", monitor.bench, raising=False)
+
     # Monitor run with duration
     code = main([
         "monitor",
@@ -391,3 +395,89 @@ def test_cli_subcommands(tmp_path, make_cgroup, make_proc, monkeypatch):
     assert report_file.is_file()
     data = json.loads(report_file.read_text(encoding="utf-8"))
     assert "pct_of_one_core" in data
+
+
+def test_leaf_irq_psi(tmp_path, make_cgroup, make_proc):
+    root = tmp_path / "sys" / "fs" / "cgroup"
+    proc = tmp_path / "proc"
+    make_proc(
+        proc,
+        stat="cpu  100 0 50 800 0 10 20 0\n",
+        meminfo="MemTotal: 16000000 kB\nMemAvailable: 8000000 kB\n",
+        cpu_psi="",
+        mem_psi="",
+        io_psi="",
+    )
+    make_cgroup(
+        root,
+        "leaf_irq.slice",
+        cgroup_events="populated 1\n",
+        cpu_stat="usage_usec 1000000\n",
+        irq_pressure="full avg10=4.50 avg60=2.00 avg300=1.00 total=500\n",
+    )
+    make_cgroup(
+        root,
+        "leaf_noirq.slice",
+        cgroup_events="populated 1\n",
+        cpu_stat="usage_usec 1000000\n",
+    )
+    rows, _ = sweep(root, proc, state=None, now_wall=1000.0, now_mono=100.0)
+    irq_row = next(r for r in rows if r["cgroup"] == "/leaf_irq.slice")
+    assert irq_row["irq_psi"] == pytest.approx(4.50)
+
+    noirq_row = next(r for r in rows if r["cgroup"] == "/leaf_noirq.slice")
+    assert noirq_row["irq_psi"] is None
+
+
+def test_host_irq_psi(tmp_path, make_proc):
+    proc = tmp_path / "proc"
+    make_proc(
+        proc,
+        stat="cpu  100 0 50 800 0 10 20 0\n",
+        meminfo="MemTotal: 16000 kB\nMemAvailable: 6000 kB\n",
+        cpu_psi="",
+        mem_psi="",
+        io_psi="",
+    )
+    (proc / "pressure" / "irq").write_text("full avg10=7.25 avg60=3.00 avg300=1.50 total=700\n", encoding="utf-8")
+    raw = read_host(proc)
+    assert raw["irq_psi"] == pytest.approx(7.25)
+    gauges = host_gauges(None, raw, dt=1.0, tck=100)
+    assert gauges["irq_psi"] == pytest.approx(7.25)
+
+    (proc / "pressure" / "irq").unlink()
+    raw_missing = read_host(proc)
+    assert raw_missing["irq_psi"] is None
+    gauges_missing = host_gauges(None, raw_missing, dt=1.0, tck=100)
+    assert gauges_missing["irq_psi"] is None
+
+
+def test_open_db_upgrades_old_schema(tmp_path):
+    db_path = tmp_path / "old.db"
+    old_schema = (
+        "create table samples (ts integer not null, cgroup text not null, "
+        "cpu_cores real, throttled_ratio real, mem_bytes real, io_rbps real, io_wbps real, "
+        "cpu_psi real, mem_psi real, io_psi real, pids real, softirq_cores real, "
+        "netrx_attrib_cores real, netrx_blamed_cores real, netrx_unattrib_cores real, "
+        "primary key (cgroup, ts)) without rowid;\ncreate index samples_ts on samples(ts);"
+    )
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(old_schema)
+    conn.execute(
+        "insert into samples (ts, cgroup, cpu_cores, cpu_psi) values (1000, 'host', 1.5, 0.2)"
+    )
+    conn.commit()
+    conn.close()
+
+    conn = open_db(db_path)
+    cols = [row[1] for row in conn.execute("pragma table_info(samples)").fetchall()]
+    assert "irq_psi" in cols
+    assert cols[-1] == "irq_psi"
+
+    row = conn.execute("select ts, cgroup, cpu_cores, cpu_psi, irq_psi from samples where ts = 1000").fetchone()
+    assert row == (1000, "host", 1.5, 0.2, None)
+
+    write_rows(conn, [{"ts": 2000, "cgroup": "host", "cpu_cores": 2.0, "irq_psi": 3.5}])
+    row2 = conn.execute("select ts, cgroup, cpu_cores, irq_psi from samples where ts = 2000").fetchone()
+    assert row2 == (2000, "host", 2.0, 3.5)
+    conn.close()

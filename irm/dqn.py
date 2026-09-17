@@ -13,6 +13,8 @@ from irm.sim import (
     STEP,
     BestFit,
     FirstFit,
+    ForecastBestFit,
+    ForecastFirstFit,
     Policy,
     Simulator,
     synthetic_cluster,
@@ -433,6 +435,64 @@ def demo(
     return result
 
 
+T_CRITICAL_95: dict[int, float] = {
+    1: 12.706,
+    2: 4.303,
+    3: 3.182,
+    4: 2.776,
+    5: 2.571,
+    6: 2.447,
+    7: 2.365,
+    8: 2.306,
+    9: 2.262,
+    10: 2.228,
+    11: 2.201,
+    12: 2.179,
+    13: 2.160,
+    14: 2.145,
+    15: 2.131,
+    16: 2.120,
+    17: 2.110,
+    18: 2.101,
+    19: 2.093,
+    20: 2.086,
+    21: 2.080,
+    22: 2.074,
+    23: 2.069,
+    24: 2.064,
+    25: 2.060,
+    26: 2.056,
+    27: 2.052,
+    28: 2.048,
+    29: 2.045,
+    30: 2.042,
+}
+
+
+def t_critical_value(df: int) -> float:
+    """Return two-sided 95% t critical value for df 1-30, 1.96 beyond, or 0.0 for df <= 0."""
+    if df <= 0:
+        return 0.0
+    return T_CRITICAL_95.get(df, 1.96)
+
+
+def compute_n_hosts(
+    data: dict,
+    host_slack: float = 2.0,
+    t_max: int = 172800,
+) -> int:
+    """Size cluster from training days only (t < t_max, default 172800)."""
+    step = int(data.get("step", STEP))
+    steps_range = range(0, t_max, step)
+    peak_cores = 0.0
+    for t in steps_range:
+        alive = (data["created"] <= t) & (data["deleted"] > t)
+        s_c = float(np.sum(data["cores"][alive]))
+        if s_c > peak_cores:
+            peak_cores = s_c
+    return max(4, math.ceil(host_slack * peak_cores / (HOST_CORES * OVERCOMMIT)))
+
+
 def study(
     out_json: str | Path,
     seeds: tuple[int, ...] | list[int] = (0, 1, 2, 3, 4),
@@ -453,15 +513,8 @@ def study(
         t_seed_start = time.monotonic()
         data = synthetic_cluster(n_vms, 864, seed=seed, util_scale=util_scale)
 
-        # Peak Σ cores of alive VMs across simulation range
-        steps_range = range(0, 864 * STEP, STEP)
-        peak_cores = 0.0
-        for t in steps_range:
-            alive = (data["created"] <= t) & (data["deleted"] > t)
-            s_c = float(np.sum(data["cores"][alive]))
-            if s_c > peak_cores:
-                peak_cores = s_c
-        n_hosts = max(4, math.ceil(host_slack * peak_cores / (HOST_CORES * OVERCOMMIT)))
+        # Peak Σ cores of alive VMs across training days only (t < 172800)
+        n_hosts = compute_n_hosts(data, host_slack=host_slack, t_max=172800)
         n_hosts_list.append(n_hosts)
 
         # Train DQN (use_k=True) and DQN_noK (use_k=False) on first 2 days
@@ -484,7 +537,7 @@ def study(
             verbose=False,
         )
 
-        # Evaluate FirstFit, BestFit, DQN, DQN_noK on day 3
+        # Evaluate FirstFit, BestFit, ForecastFirstFit_0.8, ForecastBestFit_1.0, DQN, DQN_noK on day 3
         eval_k_true = evaluate(
             data,
             n_hosts,
@@ -493,6 +546,8 @@ def study(
             policies={
                 "FirstFit": FirstFit(),
                 "BestFit": BestFit(),
+                "ForecastFirstFit_0.8": ForecastFirstFit(cap=0.8),
+                "ForecastBestFit_1.0": ForecastBestFit(cap=1.0),
                 "DQN": DQNPolicy(net_dqn, epsilon=0.0, seed=seed),
             },
             use_k=True,
@@ -513,6 +568,8 @@ def study(
         seed_metrics = {
             "FirstFit": eval_k_true["FirstFit"],
             "BestFit": eval_k_true["BestFit"],
+            "ForecastFirstFit_0.8": eval_k_true["ForecastFirstFit_0.8"],
+            "ForecastBestFit_1.0": eval_k_true["ForecastBestFit_1.0"],
             "DQN": eval_k_true["DQN"],
             "DQN_noK": eval_k_false["DQN_noK"],
         }
@@ -529,7 +586,14 @@ def study(
         "migrations",
         "mean_active_hosts",
     ]
-    policies_to_summarize = ["FirstFit", "BestFit", "DQN", "DQN_noK"]
+    policies_to_summarize = [
+        "FirstFit",
+        "BestFit",
+        "ForecastFirstFit_0.8",
+        "ForecastBestFit_1.0",
+        "DQN",
+        "DQN_noK",
+    ]
     n_seeds = len(seeds)
 
     summary = {}
@@ -542,7 +606,9 @@ def study(
                 ci95_val = 0.0
             else:
                 std_val = float(np.std(vals, ddof=1))
-                ci95_val = float(1.96 * std_val / math.sqrt(n_seeds))
+                df = n_seeds - 1
+                t_val = t_critical_value(df)
+                ci95_val = float(t_val * std_val / math.sqrt(n_seeds))
             summary[pol][m] = {"mean": mean_val, "ci95": ci95_val}
 
     total_seconds = float(time.monotonic() - t_start_total)
@@ -554,6 +620,8 @@ def study(
         "util_scale": float(util_scale),
         "host_slack": float(host_slack),
         "n_hosts": n_hosts_list,
+        "sizing": "training days only",
+        "ci_method": "t",
         "summary": summary,
         "per_seed": per_seed,
         "total_seconds": total_seconds,
@@ -564,3 +632,4 @@ def study(
     out_p.write_text(json.dumps(result, indent=2), encoding="utf-8")
 
     return result
+

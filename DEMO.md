@@ -31,7 +31,7 @@ Wait ~60 s (watch both appear at the top of the Monitor card; click `noisy-demo.
 **Analyse + Plan:**
 ```sh
 A=/user.slice/user-1000.slice/user@1000.service/app.slice
-irm recommend --protect $A/critical-demo.scope --only $A/noisy-demo.scope --min-samples 12 --hours 1
+irm recommend --protect $A/critical-demo.scope --only $A/noisy-demo.scope --min-samples 12 --hours 1 --out data/demo-plan.json
 ```
 Say: the planner takes each cgroup's P95 demand, **reserves** capacity for the protected job, counts every other
 running cgroup as background demand, and squeezes the target into what is left; the reason column shows the budget
@@ -40,8 +40,8 @@ table. `--only` keeps the demo from touching your terminal, which is busy too.
 
 **Execute (dry run, then for real):**
 ```sh
-irm apply            # prints old → new, writes nothing
-irm apply --yes      # journaled cgroup v2 writes: cpu.max, memory.high, cpu.weight
+irm apply --from data/demo-plan.json            # prints old → new, writes nothing
+irm apply --from data/demo-plan.json --yes      # journaled cgroup v2 writes: cpu.max, memory.high, cpu.weight
 ```
 Watch the chart: `noisy-demo` drops to its quota and its throttled line rises; the critical job keeps its cores.
 Safety: writes are limited to your own delegated systemd subtree, validated, clamped, and journaled.

@@ -246,3 +246,27 @@ body {
   }
 }
 
+.warning-text {
+  color: #b91c1c;
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+@media (prefers-color-scheme: dark) {
+  .warning-text {
+    color: #fca5a5;
+    background-color: #450a0a;
+    border-color: #7f1d1d;
+  }
+}
+
+.dimmed {
+  opacity: 0.45;
+  filter: grayscale(40%);
+  transition: opacity 0.2s ease;
+}
+

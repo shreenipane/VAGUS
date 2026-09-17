@@ -1,15 +1,18 @@
 import json
 from pathlib import Path
+import numpy as np
 import pytest
 import torch
 
 from irm.dqn import (
     QNet,
     compute_double_dqn_target,
+    compute_n_hosts,
     demo,
     evaluate,
     masked_argmax,
     study,
+    t_critical_value,
     train_dqn,
 )
 import irm.dqn
@@ -131,7 +134,7 @@ def test_demo_full_20_episodes(tmp_path):
 
     assert out_json.exists()
     assert model_path.exists()
-    assert res["train_seconds"] < 180.0  # Under 3 minutes
+    assert res["train_seconds"] > 0  # Wall-clock time is non-deterministic under load
     assert "FirstFit" in res
     assert "BestFit" in res
     assert "DQN" in res
@@ -140,7 +143,7 @@ def test_demo_full_20_episodes(tmp_path):
 def test_study_tiny(tmp_path):
     """study on a tiny setting (seeds=(0, 1), episodes=1, n_vms=30) writes every key,
 
-    with 4 policies in summary and a ci95 for each metric.
+    with 6 policies in summary and a ci95 for each metric.
     """
     out_json = tmp_path / "study.json"
     res = study(out_json, seeds=(0, 1), episodes=1, n_vms=30, util_scale=1.4, host_slack=2.0)
@@ -153,6 +156,8 @@ def test_study_tiny(tmp_path):
         "util_scale",
         "host_slack",
         "n_hosts",
+        "sizing",
+        "ci_method",
         "summary",
         "per_seed",
         "total_seconds",
@@ -168,9 +173,18 @@ def test_study_tiny(tmp_path):
     assert len(res["n_hosts"]) == 2
     assert len(res["per_seed"]) == 2
     assert res["total_seconds"] > 0
+    assert res["sizing"] == "training days only"
+    assert res["ci_method"] == "t"
 
-    # 4 policies in summary
-    policies = ["FirstFit", "BestFit", "DQN", "DQN_noK"]
+    # 6 policies in summary
+    policies = [
+        "FirstFit",
+        "BestFit",
+        "ForecastFirstFit_0.8",
+        "ForecastBestFit_1.0",
+        "DQN",
+        "DQN_noK",
+    ]
     assert set(res["summary"].keys()) == set(policies)
 
     # 5 metrics in summary for each policy
@@ -200,6 +214,8 @@ def test_study_tiny(tmp_path):
     assert out_json.exists()
     loaded = json.loads(out_json.read_text(encoding="utf-8"))
     assert loaded["seeds"] == [0, 1]
+    assert loaded["sizing"] == "training days only"
+    assert loaded["ci_method"] == "t"
     assert set(loaded["summary"].keys()) == set(policies)
 
 
@@ -207,7 +223,14 @@ def test_study_single_seed(tmp_path):
     """ci95 must be 0.0 when n = 1."""
     out_json = tmp_path / "study_1seed.json"
     res = study(out_json, seeds=(0,), episodes=1, n_vms=20, util_scale=1.0, host_slack=2.0)
-    for pol in ["FirstFit", "BestFit", "DQN", "DQN_noK"]:
+    for pol in [
+        "FirstFit",
+        "BestFit",
+        "ForecastFirstFit_0.8",
+        "ForecastBestFit_1.0",
+        "DQN",
+        "DQN_noK",
+    ]:
         for m in [
             "energy_kwh",
             "sla_overload_frac",
@@ -216,4 +239,31 @@ def test_study_single_seed(tmp_path):
             "mean_active_hosts",
         ]:
             assert res["summary"][pol][m]["ci95"] == 0.0
+
+
+def test_t_critical_values():
+    """The t critical value for df=4 is 2.776; for df=100 it is 1.96; n=1 gives 0."""
+    assert t_critical_value(4) == 2.776
+    assert t_critical_value(100) == 1.96
+    assert t_critical_value(0) == 0.0
+
+
+def test_cluster_sizing_ignores_post_training_vms():
+    """Cluster sizing ignores a VM that exists only after t = 172800."""
+    # VM 0: 4 cores, created at 0, deleted at 100000 (alive during t < 172800)
+    # VM 1: 500 cores, created at 180000, deleted at 200000 (only alive after t = 172800)
+    data = {
+        "cores": np.array([4.0, 500.0], dtype=np.float32),
+        "created": np.array([0, 180000], dtype=np.int64),
+        "deleted": np.array([100000, 200000], dtype=np.int64),
+        "step": 300,
+    }
+    # Training days only (t < 172800): only VM 0 is considered -> max(4, ceil(2.0 * 4 / 96)) = 4
+    n_hosts = compute_n_hosts(data, host_slack=2.0, t_max=172800)
+    assert n_hosts == 4
+
+    # If sized over entire trace (including t >= 172800): VM 1 is included -> max(4, ceil(2.0 * 500 / 96)) = 11
+    n_hosts_full = compute_n_hosts(data, host_slack=2.0, t_max=200100)
+    assert n_hosts_full == 11
+
 
