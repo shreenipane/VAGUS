@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Intelligent Resource Manager</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="header">
+    <h1 id="app-title">Intelligent Resource Manager</h1>
+    <p id="app-subtitle" class="subtitle">Monitor &rarr; Analyse &rarr; Plan &rarr; Execute</p>
+  </header>
+
+  <main class="grid-container">
+    <!-- Card 1: Monitor -->
+    <section class="card" id="card-monitor">
+      <h2 class="card-title">Monitor</h2>
+      <div class="host-stats" id="host-stats">
+        <div class="stat-item">
+          <span class="stat-label">Host CPU</span>
+          <span class="stat-value" id="host-cpu">-</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Host Memory</span>
+          <span class="stat-value" id="host-mem">-</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">CPU PSI</span>
+          <span class="stat-value" id="host-psi">-</span>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table class="data-table" id="cgroups-table">
+          <thead>
+            <tr>
+              <th>Cgroup</th>
+              <th>CPU cores</th>
+              <th>Memory MiB</th>
+              <th>Throttled %</th>
+              <th>PSI</th>
+            </tr>
+          </thead>
+          <tbody id="cgroups-tbody">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Card 2: Live chart -->
+    <section class="card" id="card-chart">
+      <div class="card-header-row">
+        <h2 class="card-title">Live chart</h2>
+        <span class="chart-selection" id="chart-selection">Selected: none</span>
+      </div>
+      <div class="chart-container" id="chart-container">
+      </div>
+    </section>
+
+    <!-- Card 3: Plan / Execute -->
+    <section class="card" id="card-plan">
+      <h2 class="card-title">Plan / Execute</h2>
+      <div id="plan-container">
+        <div class="table-wrapper" id="recs-table-wrapper">
+          <table class="data-table" id="recs-table">
+            <thead>
+              <tr>
+                <th>Cgroup</th>
+                <th>Source</th>
+                <th>Peak cores</th>
+                <th>cpu.max</th>
+                <th>memory.high</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody id="recs-tbody">
+            </tbody>
+          </table>
+        </div>
+        <div id="recs-placeholder" class="placeholder">Run: irm recommend</div>
+        <div class="sub-section" id="pairs-section">
+          <h3 class="sub-title">Correlated Pairs</h3>
+          <div class="table-wrapper">
+            <table class="data-table" id="pairs-table">
+              <thead>
+                <tr>
+                  <th>Cgroup A</th>
+                  <th>Cgroup B</th>
+                  <th>Pearson &rho;</th>
+                  <th>Coupling k</th>
+                </tr>
+              </thead>
+              <tbody id="pairs-tbody">
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Card 4: Analyse / Research -->
+    <section class="card" id="card-analyse">
+      <h2 class="card-title">Analyse / Research</h2>
+      <div id="overhead-line" class="overhead-text">Monitor overhead: loading...</div>
+
+      <div class="sub-section">
+        <h3 class="sub-title">Forecast Models</h3>
+        <div class="table-wrapper">
+          <table class="data-table" id="forecast-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Pinball</th>
+                <th>Coverage</th>
+                <th>Mean Under-prediction</th>
+              </tr>
+            </thead>
+            <tbody id="forecast-tbody">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="sub-section">
+        <h3 class="sub-title">Placement Evaluation</h3>
+        <div class="table-wrapper">
+          <table class="data-table" id="placement-table">
+            <thead>
+              <tr>
+                <th>Policy</th>
+                <th>Energy kWh</th>
+                <th>SLA Overload %</th>
+                <th>Migrations</th>
+                <th>Mean Active Hosts</th>
+              </tr>
+            </thead>
+            <tbody id="placement-tbody">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="sub-section" id="forecast-example-section">
+        <h3 class="sub-title">Forecast Example</h3>
+        <div class="chart-container" id="forecast-example-container">
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

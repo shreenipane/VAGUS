@@ -19,6 +19,8 @@ Status: see [BUILD_LOG.md](BUILD_LOG.md).
 
 | File | What it holds |
 |---|---|
+| [HOWTO.md](HOWTO.md) | **How to install and run everything** |
+| [DEMO.md](DEMO.md) | Step-by-step faculty demo with talking points |
 | [PRD.md](PRD.md) | Problem, goals, scope, success metrics |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Components, data flow, design decisions, deviations from the proposal |
 | [TRD.md](TRD.md) | Exact technical specification every task refers to |
