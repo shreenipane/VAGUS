@@ -321,3 +321,28 @@ is twice the BPF map's 16,384 entries, so linear probing always terminates. Live
 Two background chains waited with `pgrep -f "<pattern>"` where the pattern appeared in the chain's own command line, so
 they matched themselves and would have waited forever. Caught at 11:19 and killed; the experiment start slipped ~5 min.
 Rule: use the `[x]yz` bracket trick in `pgrep -f` patterns inside the same shell.
+
+### Live SLO experiment (11:23–11:56): the SLA claim holds on this machine
+Full suite before the run: `92 passed, 1 deselected`. `irm experiment slo --minutes 3 --reps 3 --rate 200`, orders ABC,
+BCA, CAB. Service: asyncio HTTP, ~2 ms SHA-256 work per request; open-loop Poisson load measured from scheduled time.
+
+| Condition | p50 ms | p95 ms | p99 ms | p99 range over reps | SLO violations (> 13.47 ms) | rps | errors |
+|---|---|---|---|---|---|---|---|
+| A alone | 3.19 | 5.31 | 6.65 | 6.6–6.7 | 0.2% | 199.1 | 0 |
+| B + cpuhog (16 procs) + UDP flood | 4.17 | 13.37 | **22.13** | 11.7–27.3 | **55.4%** | 199.1 | 0 |
+| C = B + irm | 3.00 | 6.76 | **9.53** | 9.4–9.7 | **3.5%** | 198.7 | 0 |
+
+Applied plan in C: service `cpu.weight 1000`, `cpu.max max`; cpuhog `1323824 100000` (13.2 cores); nethog
+`165967 100000` (1.66 cores). **p99 −57% versus co-located, SLO violations 55.4% → 3.5%**, throughput unchanged.
+Afterwards: no numeric `cpu.max` left in the user session.
+
+Defects found, not yet fixed:
+- `cpuhog_ips` is null for C: the driver waits only 5 s for the hog, which runs 65 s longer than the load generator in C,
+  so its output file does not exist yet. The cost to batch throughput under `irm` is therefore **not measured**.
+- Two `irm-exp-*` scopes (cpuhog, nethog of one C run) remained listed as `failed` units (processes already gone). Cleaned
+  with `systemctl --user reset-failed`; the driver should also call `reset-failed`.
+
+### eBPF live test staged
+Rebuilt with `irm-test bpf clean` + `irm-test bpf` (no warnings), copied with `root.sh` and `live.sh` to the
+architect's scratch directory (not writable by the agent). An unprivileged run fails with `EPERM` as expected
+(`unprivileged_bpf_disabled = 2`). Needs the user's `pkexec`.

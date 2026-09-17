@@ -1,0 +1,96 @@
+{
+  "slo_target_ms": 13.47330179749406,
+  "minutes": 3,
+  "reps": 3,
+  "rate": 200,
+  "conditions": {
+    "A": {
+      "p50_ms": 3.1948370997270104,
+      "p95_ms": 5.310815614575403,
+      "p99_ms": 6.649143351241947,
+      "rep_p99_ms": {
+        "min": 6.571036939058101,
+        "mean": 6.653484439011662,
+        "max": 6.73665089874703
+      },
+      "violation_rate": 0.001851851851851852,
+      "rps": 199.1074074074074,
+      "errors": 0,
+      "cpuhog_ips": null
+    },
+    "B": {
+      "p50_ms": 4.167563150986098,
+      "p95_ms": 13.369176947890077,
+      "p99_ms": 22.132505609551984,
+      "rep_p99_ms": {
+        "min": 11.658202519902266,
+        "mean": 19.75405234809536,
+        "max": 27.340978510619642
+      },
+      "violation_rate": 0.5537037037037037,
+      "rps": 199.12962962962962,
+      "errors": 0,
+      "cpuhog_ips": 112749263.15789473
+    },
+    "C": {
+      "p50_ms": 3.0011117487447336,
+      "p95_ms": 6.764626697986387,
+      "p99_ms": 9.52873516653199,
+      "rep_p99_ms": {
+        "min": 9.392023142136164,
+        "mean": 9.518193332454151,
+        "max": 9.667920008068904
+      },
+      "violation_rate": 0.03518518518518519,
+      "rps": 198.65,
+      "errors": 0,
+      "cpuhog_ips": null
+    }
+  },
+  "applied_plan": [
+    {
+      "cgroup": "/user.slice/user-1000.slice/user@1000.service/app.slice/irm-exp-cpuhog-ac58dfc7.scope",
+      "source": "empirical",
+      "peak_cores": 13.8611,
+      "cpu_max": "1323824 100000",
+      "memory_high": 447741952,
+      "cpu_weight": null,
+      "old": {
+        "cpu.max": "max 100000",
+        "memory.high": "max",
+        "cpu.weight": "100"
+      },
+      "reason": "q95 13.86 cores (empirical) \u00d7 1.25; squeezed to fit 14.90 free cores after 0.00 reserved and 1.10 background"
+    },
+    {
+      "cgroup": "/user.slice/user-1000.slice/user@1000.service/app.slice/irm-exp-nethog-acbc5f76.scope",
+      "source": "empirical",
+      "peak_cores": 1.7378,
+      "cpu_max": "165967 100000",
+      "memory_high": 124780544,
+      "cpu_weight": null,
+      "old": {
+        "cpu.max": "max 100000",
+        "memory.high": "max",
+        "cpu.weight": "100"
+      },
+      "reason": "q95 1.74 cores (empirical) \u00d7 1.25; squeezed to fit 14.90 free cores after 0.00 reserved and 1.10 background"
+    },
+    {
+      "cgroup": "/user.slice/user-1000.slice/user@1000.service/app.slice/irm-exp-service-9995082a.scope",
+      "source": "empirical",
+      "peak_cores": 0.0,
+      "cpu_max": "max",
+      "memory_high": "max",
+      "cpu_weight": 1000,
+      "old": {
+        "cpu.max": "max 100000",
+        "memory.high": "max",
+        "cpu.weight": "100"
+      },
+      "reason": "protected; peak 0.00 cores (empirical)"
+    }
+  ],
+  "started_at": "2026-09-17T05:53:41.902924+00:00",
+  "finished_at": "2026-09-17T06:26:10.672838+00:00"
+}
