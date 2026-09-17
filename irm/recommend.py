@@ -29,6 +29,8 @@ def recommend(
     min_samples: int = 360,
     hours: float = 24.0,
     now: int | float | None = None,
+    min_cores: float = 0.5,
+    only: list[str] | set[str] | tuple[str, ...] | None = None,
 ) -> dict:
     if now is None:
         now_ts = int(time.time())
@@ -84,14 +86,47 @@ def recommend(
             }
             cgroup_buckets[cg] = buckets
 
-    protect_set = set(protect or [])
+    if isinstance(protect, str):
+        protect_set = {protect}
+    else:
+        protect_set = set(protect or [])
+
+    if only is not None:
+        only_set = {only} if isinstance(only, str) else set(only)
+    else:
+        only_set = None
+
     ncpu = os.cpu_count() or 1
 
-    protected_cgs = [cg for cg in qualifying if cg in protect_set]
-    other_cgs = [cg for cg in qualifying if cg not in protect_set]
+    protected_cgs: list[str] = []
+    other_cgs: list[str] = []
+    background_cgs: list[str] = []
+
+    for cg in qualifying:
+        if cg in protect_set:
+            protected_cgs.append(cg)
+        elif only_set is not None:
+            if cg in only_set:
+                other_cgs.append(cg)
+            else:
+                background_cgs.append(cg)
+                skipped.append({
+                    "cgroup": cg,
+                    "reason": "background: not in --only",
+                })
+        else:
+            if qualifying[cg]["peak"] >= min_cores:
+                other_cgs.append(cg)
+            else:
+                background_cgs.append(cg)
+                skipped.append({
+                    "cgroup": cg,
+                    "reason": f"background: peak {qualifying[cg]['peak']:.2f} cores < {min_cores:.2f}",
+                })
 
     reserve = sum(qualifying[cg]["peak"] * headroom for cg in protected_cgs)
-    avail = max(0.1 * len(other_cgs), ncpu - reserve)
+    background = sum(qualifying[cg]["peak"] for cg in background_cgs)
+    avail = max(0.0, ncpu - reserve - background)
 
     sum_want = sum(qualifying[cg]["peak"] * headroom for cg in other_cgs)
     scale = (avail / sum_want) if sum_want > avail else 1.0
@@ -116,7 +151,13 @@ def recommend(
         peak = qualifying[cg]["peak"]
         max_mem = qualifying[cg]["max_mem"]
         want = peak * headroom
-        quota = max(0.1, want * scale)
+        scaled = want * scale
+        if scaled < 0.1:
+            quota = 0.1
+            raised = True
+        else:
+            quota = scaled
+            raised = False
 
         if quota >= 0.9 * ncpu:
             cpu_max = "max"
@@ -128,9 +169,15 @@ def recommend(
         memory_high = int(max(64 * MIB, math.ceil(mem_scaled / MIB) * MIB))
 
         if sum_want > avail:
-            reason = f"q95 {peak:.2f} cores (empirical) × {headroom:.2f}; squeezed to fit {avail:.2f} free cores"
+            reason = (
+                f"q95 {peak:.2f} cores (empirical) × {headroom:.2f}; "
+                f"squeezed to fit {avail:.2f} free cores after {reserve:.2f} reserved and {background:.2f} background"
+            )
         else:
             reason = f"q95 {peak:.2f} cores (empirical) × {headroom:.2f}"
+
+        if raised:
+            reason += "; raised to the 0.1-core floor"
 
         items.append({
             "cgroup": cg,

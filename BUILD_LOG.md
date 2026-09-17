@@ -236,3 +236,16 @@ Mitigation applied immediately: `irm revert` (batch 2 fully restored), then only
 filtered file. Verified: `noisy-demo.scope` is the only cgroup under `user@1000.service` with a numeric `cpu.max`.
 DEMO.md and HOWTO.md now filter before `apply`. **To fix after the demo:** recommend only for cgroups above a demand
 threshold or named with `--only`, and drop the floor from `avail`.
+
+### Fix: recommender over-reach (`.tasks/p5-recommend-fix.md`)
+Targets are now protected cgroups, cgroups with `peak ≥ --min-cores` (0.5), or those named with `--only`; everything
+else is background demand (`avail = max(0, ncpu − reserve − background)`, no floor term; the 0.1-core floor is per
+item). agy: `denied_actions` none; 4 tests added (50 idle leaves → only 2 items and `925000 100000`; zero budget →
+floors; `--only`; CLI flags); no existing assertion changed. Architect check on the real database (no apply):
+**133 cgroups background, 5 items** (two stopped demo scopes, three terminal tabs that really used 0.6–8.6 cores during
+jailed training runs). DEMO.md now uses `--only noisy-demo` instead of the filtering workaround; TRD §11 updated.
+Remaining limitation: cgroups that stopped within `--hours` still get items; `apply` rejects them (no
+`cgroup.controllers`) and exits 1.
+
+Also added `run_tests.sh` (direct pytest, no jail) and `run_all.sh` (tests, then monitor + dashboard, opens the browser)
+at the user's request.

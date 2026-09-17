@@ -6,6 +6,14 @@ Tested on Fedora 44, kernel 7.1, Python 3.14, uv 0.12. Every command below runs 
 cd ~/"Heavy Coding/Projects/intelligent-resource-manager"
 ```
 
+## 0. One command: tests + dashboard
+
+```sh
+./run_all.sh                 # runs every test, starts monitor + dashboard if needed, opens http://127.0.0.1:8765
+PORT=8800 ./run_all.sh       # dashboard on another port
+pkill -f 'irm (monitor|dashboard)'   # stop the background monitor and dashboard
+```
+
 ## 1. One-time setup
 
 **Requirements:** Linux with cgroup v2 (`stat -fc %T /sys/fs/cgroup` prints `cgroup2fs`), Python ≥ 3.14, `uv`,
@@ -36,16 +44,18 @@ irm dashboard                          # http://127.0.0.1:8765  (localhost only,
 After at least a minute of monitoring:
 
 ```sh
-irm recommend --min-samples 12 --hours 1                 # limits for every busy cgroup → data/recommendations.json
-irm recommend --protect <cgroup path> --min-samples 12   # reserve capacity for a latency-critical cgroup
+irm recommend --min-samples 12 --hours 1                 # limits for busy cgroups (≥ 0.5 cores) → data/recommendations.json
+irm recommend --protect <critical> --only <noisy> --min-samples 12   # reserve for one cgroup, limit only another
 irm apply                                                # dry run: prints old → new, writes nothing
 irm apply --yes                                          # writes cpu.max / memory.high / cpu.weight, journaled
 irm revert                                               # restores the previous values of the last batch
 ```
 
-- ⚠️ **Prototype bug:** `recommend` currently emits limits for every busy cgroup in your session, and the 0.1-core floor
-  per cgroup can over-squeeze the budget. Until it is fixed, filter `data/recommendations.json` to the cgroups you mean
-  (see DEMO.md §3) and pass the filtered file to `apply --from`. If you already applied everything: `irm revert`.
+- Only cgroups whose P95 demand is at least `--min-cores` (default 0.5) get limits; idle ones are listed as
+  `background` and their demand is subtracted from the budget. Use `--only <cgroup>…` to limit exactly the cgroups you
+  name (recommended: your terminal is usually busy too). If you applied something by mistake: `irm revert`.
+- Known limitation: a cgroup that stopped within `--hours` can still get a recommendation; `apply` rejects it safely
+  (no `cgroup.controllers`) and exits 1.
 - Cgroup paths look like `/user.slice/user-1000.slice/user@1000.service/app.slice/<name>.scope` (the dashboard shows
   the full path when you hover over a name).
 - `apply` only writes inside your own systemd user subtree (`user@<uid>.service`). Add others with `--allow`, at your
@@ -70,6 +80,15 @@ run them jailed (recommended for code you have not reviewed): `irm-test run trai
 placement`. The dashboard's Analyse card shows the results.
 
 ## 4. Tests
+
+Directly, without the jail (simplest):
+
+```sh
+./run_tests.sh                         # full suite (tests marked `live` are excluded)
+./run_tests.sh tests/test_monitor.py -v
+```
+
+Jailed (what the coding agent uses; recommended for code you have not reviewed):
 
 ```sh
 irm-test -q                            # full suite, jailed (tests marked `live` are excluded)

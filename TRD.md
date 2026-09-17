@@ -53,7 +53,7 @@ reports/                           generated, committed
 | `irm train dqn` | `--episodes 60` `--seed 0` `--w-sla 10` `--w-energy 1` `--w-mig 0.1` |
 | `irm evaluate forecast` | `--source azure` (or `local`) `--arima-windows 500` |
 | `irm evaluate placement` | — |
-| `irm recommend` | `--db` `--protect CGROUP…` `--headroom 1.25` `--min-samples 360` `--out` |
+| `irm recommend` | `--db` `--protect CGROUP…` `--only CGROUP…` `--min-cores 0.5` `--headroom 1.25` `--min-samples 360` `--hours 24` `--out` |
 | `irm apply` | `--from` `--yes` `--allow PREFIX…` `--root /sys/fs/cgroup` |
 | `irm revert` | `--batch N` (last applied batch) `--root /sys/fs/cgroup` |
 | `irm dashboard` | `--port 8765` |
@@ -319,10 +319,14 @@ Constants: `HOST_CORES 48`, `HOST_MEM_GB 384`, `OVERCOMMIT 2.0`, `P_IDLE_W 100`,
 3. Peak: if the last 48 buckets all exist and `models/forecast.pt` exists → `max(predict_q95) × ncpu`, source
    `forecast`. Else if ≥ `--min-samples` samples in 24 h → 95th percentile of `d`, source `empirical`. Else listed in
    `skipped` with the reason.
-4. Protected cgroups (`--protect`, exact names): `cpu.max = "max"`, `cpu.weight = 1000`, `memory.high = "max"`.
-   `reserve = Σ peak_p × headroom`; `avail = max(0.1 × n_others, ncpu − reserve)`.
-5. Others: `want = peak × headroom`. If `Σ want > avail`, scale every `want` by `avail / Σ want`. Quota ≥ 0.1 core;
-   ≥ 0.9 × ncpu → `"max"`; else `"<round(quota × 100000)> 100000"`. `cpu.weight = null` (unchanged).
+4. **Targets** (fixed after the prototype demo, BUILD_LOG): protected cgroups (`--protect`, exact names: `cpu.max =
+   "max"`, `cpu.weight = 1000`, `memory.high = "max"`); non-protected cgroups with `peak ≥ --min-cores` (0.5); with
+   `--only`, only the named non-protected cgroups. Every other qualifying cgroup is **background**: no item, listed in
+   `skipped`, and its peak still counts as demand.
+5. `reserve = Σ peak × headroom` (protected); `background = Σ peak` (background);
+   `avail = max(0, ncpu − reserve − background)` — no floor term. Non-protected targets: `want = peak × headroom`; if
+   `Σ want > avail`, scale each by `avail / Σ want`; then a 0.1-core floor per item (noted in its reason); ≥ 0.9 × ncpu →
+   `"max"`; else `"<round(quota × 100000)> 100000"`; `cpu.weight = null`.
    `memory.high = max(64 MiB, ceil_MiB(max mem_bytes over 24 h × headroom))`.
 6. Each item has a human-readable `reason`, e.g. `"q95 1.20 cores (forecast) × 1.25; squeezed to fit 12.3 free cores"`.
 7. Pairs: among leaves with peak ≥ 0.5 cores, Pearson over the last 24 h of bucket max with ≥ 24 common buckets and

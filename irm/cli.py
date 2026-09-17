@@ -46,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
     rec_parser.add_argument("--hours", type=float, default=24.0)
     rec_parser.add_argument("--out", default=str(HOME / "data" / "recommendations.json"))
     rec_parser.add_argument("--root", default="/sys/fs/cgroup")
+    rec_parser.add_argument("--min-cores", type=float, default=0.5)
+    rec_parser.add_argument("--only", nargs="*", default=None)
 
     # irm apply
     apply_parser = subparsers.add_parser("apply")
@@ -134,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
                 headroom=args.headroom,
                 min_samples=args.min_samples,
                 hours=args.hours,
+                min_cores=args.min_cores,
+                only=args.only,
             )
             out_path = Path(args.out)
             out_path.parent.mkdir(parents=True, exist_ok=True)

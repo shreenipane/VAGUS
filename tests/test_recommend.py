@@ -192,3 +192,202 @@ def test_recommend_cli(tmp_path, monkeypatch, capsys):
     assert out_json.is_file()
     captured = capsys.readouterr()
     assert cg in captured.out
+
+
+def test_recommend_idle_leaves_are_background(tmp_path, monkeypatch):
+    monkeypatch.setattr("os.cpu_count", lambda: 16)
+
+    db_path = tmp_path / "test1.db"
+    create_test_db(db_path)
+    root = tmp_path / "cgroup"
+
+    cg_crit = "/user.slice/user-1000.slice/user@1000.service/crit.scope"
+    cg_noisy = "/user.slice/user-1000.slice/user@1000.service/noisy.scope"
+    idle_cgs = [
+        f"/user.slice/user-1000.slice/user@1000.service/idle_{i:02d}.scope"
+        for i in range(50)
+    ]
+
+    now = 1000000
+    t_start = now - 120
+
+    rows = []
+    for i in range(24):
+        ts = t_start + i * 5
+        rows.append((ts, cg_crit, 5.0, 0.0, 10 * 1024 * 1024))
+        rows.append((ts, cg_noisy, 10.0, 0.0, 10 * 1024 * 1024))
+        for idle in idle_cgs:
+            rows.append((ts, idle, 0.01, 0.0, 10 * 1024 * 1024))
+
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            "insert into samples (ts, cgroup, cpu_cores, netrx_attrib_cores, mem_bytes) "
+            "values (?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+
+    recs = recommend(
+        db_path=db_path,
+        root=root,
+        protect=[cg_crit],
+        headroom=1.25,
+        min_samples=20,
+        hours=1.0,
+        now=now,
+    )
+
+    assert recs["ncpu"] == 16
+    items = {it["cgroup"]: it for it in recs["items"]}
+    assert set(items.keys()) == {cg_crit, cg_noisy}
+
+    skipped = {s["cgroup"]: s["reason"] for s in recs["skipped"]}
+    assert len(skipped) == 50
+    for idle in idle_cgs:
+        assert idle in skipped
+        assert skipped[idle] == "background: peak 0.01 cores < 0.50"
+
+    assert items[cg_noisy]["cpu_max"] == "925000 100000"
+    assert (
+        items[cg_noisy]["reason"]
+        == "q95 10.00 cores (empirical) × 1.25; squeezed to fit 9.25 free cores after 6.25 reserved and 0.50 background"
+    )
+    assert items[cg_crit]["cpu_max"] == "max"
+
+
+def test_recommend_budget_smaller_than_floors(tmp_path, monkeypatch):
+    monkeypatch.setattr("os.cpu_count", lambda: 4)
+
+    db_path = tmp_path / "test2.db"
+    create_test_db(db_path)
+    root = tmp_path / "cgroup"
+
+    cg_crit = "/user.slice/user-1000.slice/user@1000.service/crit.scope"
+    cg_t1 = "/user.slice/user-1000.slice/user@1000.service/t1.scope"
+    cg_t2 = "/user.slice/user-1000.slice/user@1000.service/t2.scope"
+    cg_t3 = "/user.slice/user-1000.slice/user@1000.service/t3.scope"
+
+    now = 1000000
+    t_start = now - 120
+
+    rows = []
+    for i in range(24):
+        ts = t_start + i * 5
+        rows.append((ts, cg_crit, 4.0, 0.0, 10 * 1024 * 1024))
+        rows.append((ts, cg_t1, 1.0, 0.0, 10 * 1024 * 1024))
+        rows.append((ts, cg_t2, 1.0, 0.0, 10 * 1024 * 1024))
+        rows.append((ts, cg_t3, 1.0, 0.0, 10 * 1024 * 1024))
+
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            "insert into samples (ts, cgroup, cpu_cores, netrx_attrib_cores, mem_bytes) "
+            "values (?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+
+    recs = recommend(
+        db_path=db_path,
+        root=root,
+        protect=[cg_crit],
+        headroom=1.25,
+        min_samples=20,
+        hours=1.0,
+        now=now,
+    )
+
+    items = {it["cgroup"]: it for it in recs["items"]}
+    for cg in (cg_t1, cg_t2, cg_t3):
+        assert items[cg]["cpu_max"] == "10000 100000"
+        assert items[cg]["reason"].endswith("; raised to the 0.1-core floor")
+        assert "squeezed to fit 0.00 free cores" in items[cg]["reason"]
+
+
+def test_recommend_only_filters_non_protected_targets(tmp_path, monkeypatch):
+    monkeypatch.setattr("os.cpu_count", lambda: 8)
+
+    db_path = tmp_path / "test3.db"
+    create_test_db(db_path)
+    root = tmp_path / "cgroup"
+
+    cg_noisy = "/user.slice/user-1000.slice/user@1000.service/noisy.scope"
+    cg_busy2 = "/user.slice/user-1000.slice/user@1000.service/busy2.scope"
+
+    now = 1000000
+    t_start = now - 120
+
+    rows = []
+    for i in range(24):
+        ts = t_start + i * 5
+        rows.append((ts, cg_noisy, 5.0, 0.0, 10 * 1024 * 1024))
+        rows.append((ts, cg_busy2, 3.0, 0.0, 10 * 1024 * 1024))
+
+    with sqlite3.connect(db_path) as conn:
+        conn.executemany(
+            "insert into samples (ts, cgroup, cpu_cores, netrx_attrib_cores, mem_bytes) "
+            "values (?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+
+    recs = recommend(
+        db_path=db_path,
+        root=root,
+        only=[cg_noisy],
+        headroom=1.25,
+        min_samples=20,
+        hours=1.0,
+        now=now,
+    )
+
+    items = {it["cgroup"]: it for it in recs["items"]}
+    assert cg_noisy in items
+    assert cg_busy2 not in items
+
+    skipped = {s["cgroup"]: s["reason"] for s in recs["skipped"]}
+    assert cg_busy2 in skipped
+    assert skipped[cg_busy2] == "background: not in --only"
+
+
+def test_recommend_cli_min_cores_and_only(tmp_path, monkeypatch, capsys):
+    import time
+    monkeypatch.setattr("os.cpu_count", lambda: 4)
+    db_path = tmp_path / "cli_opts.db"
+    create_test_db(db_path)
+    root = tmp_path / "cgroup"
+
+    cg1 = "/user.slice/user-1000.slice/user@1000.service/app1.scope"
+    cg2 = "/user.slice/user-1000.slice/user@1000.service/app2.scope"
+    now = int(time.time())
+    with sqlite3.connect(db_path) as conn:
+        for i in range(10):
+            ts = now - 50 + i * 5
+            conn.execute(
+                "insert into samples (ts, cgroup, cpu_cores, mem_bytes) values (?, ?, ?, ?)",
+                (ts, cg1, 1.0, 50 * 1024 * 1024),
+            )
+            conn.execute(
+                "insert into samples (ts, cgroup, cpu_cores, mem_bytes) values (?, ?, ?, ?)",
+                (ts, cg2, 1.0, 50 * 1024 * 1024),
+            )
+        conn.commit()
+
+    out_json = tmp_path / "out.json"
+    code = main([
+        "recommend",
+        "--db", str(db_path),
+        "--root", str(root),
+        "--min-samples", "10",
+        "--only", cg1,
+        "--min-cores", "0.5",
+        "--out", str(out_json),
+    ])
+    assert code == 0
+    with open(out_json, "r", encoding="utf-8") as f:
+        recs = json.load(f)
+    items = {it["cgroup"] for it in recs["items"]}
+    assert cg1 in items
+    assert cg2 not in items
+    skipped = {s["cgroup"]: s["reason"] for s in recs["skipped"]}
+    assert skipped.get(cg2) == "background: not in --only"
+
