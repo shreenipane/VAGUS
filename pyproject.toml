@@ -1,11 +1,13 @@
 [project]
-name = "irm"
+name = "vagus"
 version = "0.1.0"
-description = "Intelligent Resource Manager: MAPE-K resource recommendation for Linux servers"
+description = "VAGUS: Autonomous MAPE-K Intelligent Resource & QoS Manager for Linux Servers"
+authors = [{ name = "Shree Nipane", email = "shreenipane@gmail.com" }]
 requires-python = ">=3.14"
 dependencies = ["numpy", "pandas", "scikit-learn", "statsmodels", "torch", "matplotlib"]
 
 [project.scripts]
+vagus = "irm.cli:main"
 irm = "irm.cli:main"
 
 [dependency-groups]
