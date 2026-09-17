@@ -1,4 +1,4 @@
-# Faculty demo — Intelligent Resource Manager prototype
+# Faculty demo — VAGUS Prototype
 
 About 8 minutes. Everything below runs on this laptop. Open two terminals in the repository:
 `cd ~/"Heavy Coding/Projects/intelligent-resource-manager"`

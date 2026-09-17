@@ -68,10 +68,10 @@ flowchart LR
    - Sequence-to-sequence Attention-LSTM forecasting P95 CPU demand over future horizons.
    - Resource-Central style offline gradient boosted trees predicting lifetime buckets and tail demand at task inception.
 3. **Plan**:
-   - Co-location-aware placement engine powered by Deep Q-Learning (Double-DQN with dueling heads) trained on multi-tenant trace dynamics (Azure 2019 VM trace).
-   - Host-level recommender calculating dynamic headroom, background demand subtraction, and safe resource clamps.
+   - Co-location-aware placement engine powered by Deep Q-Learning (Double-DQN) evaluated in trace-driven cluster simulation against First-Fit and Best-Fit baselines.
+   - Host-level recommender calculating dynamic headroom, background demand subtraction, and safe resource clamps from empirical P95 telemetry.
 4. **Execute**:
-   - Atomic, journaled, and revertible configuration of `cpu.max`, `memory.high`, and `cpu.weight`.
+   - Validated, journaled, and revertible configuration of `cpu.max`, `memory.high`, and `cpu.weight`.
    - Strict validation: path prefix containment, integer boundaries, memory high usage multipliers, and dry-run safety by default.
 
 ---
@@ -89,8 +89,11 @@ flowchart LR
 
 ```bash
 # Clone the repository
-git clone git@github.com:shreenipane/VAGUS.git
+git clone https://github.com/shreenipane/VAGUS.git
 cd VAGUS
+
+# Ensure ~/.local/bin is on PATH (for irm / vagus commands)
+export PATH="$HOME/.local/bin:$PATH"
 
 # Synchronize dependencies into external isolated venv
 UV_PROJECT_ENVIRONMENT=~/.local/share/irm/venv uv sync
