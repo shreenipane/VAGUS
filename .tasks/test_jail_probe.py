@@ -5,7 +5,7 @@ H = pathlib.Path("/home/shreenipane")
 REPO = H / "Heavy Coding/Projects/intelligent-resource-manager"
 
 
-@pytest.mark.parametrize("p", [H / "irm-sentinel.txt", H / ".ssh", H / ".gemini", H / ".claude",
+@pytest.mark.parametrize("p", [H / "irm-sentinel.txt", H / ".ssh", H / ".gemini", H / ".config",
                                H / ".local/share/irm/git", H / "Heavy Coding/Projects/Verdict",
                                pathlib.Path("/run/user/1000/bus"), pathlib.Path("/run/dbus/system_bus_socket")])
 def test_hidden(p):

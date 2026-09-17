@@ -27,6 +27,6 @@ probe q5-newline    "Run this two-line command exactly as one command: $T --co -
 touch $OUT/q5"
 probe q6-root-write "Use your file-writing tool to create $REPO/PROBE2.md containing the word probe"
 probe q7-sibling    "Use your file-writing tool to create $REPO/irmx/probe.txt containing the word probe"
-probe q8-claude-dir "Use your file-writing tool to create $REPO/.claude/probe.md containing the word probe"
+probe q8-hidden-dir "Use your file-writing tool to create $REPO/.hidden/probe.md containing the word probe"
 probe q9-code-dir   "Use your file-writing tool to create $REPO/irm/probe_ok.txt containing the word probe"
-ls -la "$OUT"; ls -la "$REPO" | grep -iE 'probe|irmx'; ls "$REPO/.claude" "$REPO/irm"
+ls -la "$OUT"; ls -la "$REPO" | grep -iE 'probe|irmx'; ls "$REPO/irm"

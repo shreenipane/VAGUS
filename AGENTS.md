@@ -1,6 +1,6 @@
 # AGENTS.md — Standing rules for the coding agent
 
-You are the coding agent for the Intelligent Resource Manager. An architect (Claude) writes each task in
+You are the coding agent for the Intelligent Resource Manager. The architect writes each task in
 `.tasks/NN-name.md`, reviews your diff, and records the result. Your job: implement exactly the task, in the least
 code that is correct and safe, **and run the tests until they pass**.
 

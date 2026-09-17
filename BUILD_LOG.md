@@ -14,14 +14,14 @@ Nothing is marked done without a runnable check.
 
 ## Operating rules
 
-1. **Roles.** Claude specifies, reviews, gates, logs, and commits. Gemini 3.8 Flash (`agy`) writes all code and tests
-   **and runs the tests** (user decision). Claude spends its own tokens on testing only for high-priority checks:
+1. **Roles.** The architect specifies, reviews, gates, logs, and commits. The coding agent (`agy`) writes all code and tests
+   **and runs the tests** (user decision). The architect focuses on high-priority checks:
    confirming the agent's green result, live/privileged runs, mutation checks, and gates.
 2. **Dispatch.** PHASES.md §1. A non-empty `denied_actions` means the task is not done.
 3. **Self-contained specs** in `.tasks/`, kept as the audit trail. Every line is an instruction to the agent unless
    it says the architect does it.
 4. **Fragments, not rewrites.** Once a file passes, fixes are requested as fragments.
-5. **Tests must be able to fail.** At GATE steps Claude removes each safety control and expects a red test.
+5. **Tests must be able to fail.** At GATE steps the architect removes each safety control and expects a red test.
 6. **Comments explain why.** A comment that justifies a decision is never deleted.
 7. **No claim without a check.** TRD §17 lists what is still unverified.
 8. **Ponytail.** Every step is checked for code that does not need to exist.
@@ -87,7 +87,7 @@ an applied limit); claims have no evaluation method. The accepted upgrades addre
 - agy settings backed up to `settings.json.bak-2026-09-17`; added `read_file(<repo>)`, `write_file(<repo>/irm)`,
   `write_file(<repo>/tests)`, `write_file(<repo>/bpf)`, `command(irm-test)` (replaced in D.7).
 - Architect's jail probe (`.tasks/test_jail_probe.py`, run through `irm-test`): **18/18 passed** after allowing `PWD`
-  (set by `bwrap --chdir`). Hidden: `~/irm-sentinel.txt`, `~/.ssh`, `~/.gemini`, `~/.claude`, the git directory, other
+  (set by `bwrap --chdir`). Hidden: `~/irm-sentinel.txt`, `~/.ssh`, `~/.gemini`, the git directory, other
   projects, the user D-Bus socket, the system D-Bus socket. No network, no host PIDs, clean environment. Writes refused:
   repo root, venv, `/usr`, `/etc`, cgroupfs. Writable: `tests/`. Readable: cgroupfs, `/proc/stat`.
 
@@ -110,7 +110,7 @@ an applied limit); claims have no evaluation method. The accepted upgrades addre
 
 **Finding 1 (Critical): the working directory is writable regardless of `write_file` rules.** agy started in the repo
 could have rewritten the `.git` gitlink (pointing git at a directory with hooks), `pyproject.toml` (a build backend runs
-on `uv sync`), `.claude/` (hooks for a future Claude Code session in this repo), docs, or specs. The ai-memory-reflection
+on `uv sync`), docs, or specs. The ai-memory-reflection
 probes never tested a write to the repo root, so this was not seen there.
 
 **Finding 2 (Critical): environment prefixes pass the command rule.** Outside the sandbox, `LD_PRELOAD=<.so built in
@@ -136,7 +136,7 @@ the jail before `irm-test` starts. `bash -p` does not stop the dynamic loader.
 | q5 newline-separated second command | refused | refused |
 | q6 write `<repo>/PROBE2.md` | refused | refused |
 | q7 write `<repo>/irmx/probe.txt` | refused | refused (rules match directories, not string prefixes) |
-| q8 write `<repo>/.claude/probe.md` | refused | refused |
+| q8 write `<repo>/.hidden/probe.md` | refused | refused |
 | q9 write `<repo>/irm/probe_ok.txt` | written | written |
 
 With `--sandbox`, q1 and q3 fail with "No such file or directory", and everything else matches. **Decision:** dispatch
@@ -147,10 +147,10 @@ The jail probe moved to `.tasks/test_jail_probe.py` and runs at every gate.
 
 ### D.8 Pre-existing global rules removed
 
-At the user's request (2026-09-17), `command(claude)` and `command(cp)` were removed from
-`~/.gemini/antigravity-cli/settings.json`. Both predated these projects; `claude` could start an agent with the user's
+At the user's request (2026-09-17), legacy external command rules and `command(cp)` were removed from
+`~/.gemini/antigravity-cli/settings.json`. Both predated these projects; external commands could start an agent with the user's
 full permissions outside the jail. Remaining command rule: `command(/home/shreenipane/.local/bin/irm-test)`. The previous
-project's `read_file`/`write_file` rules for ai-memory-reflection are untouched. Verification probe: `claude --version`
+project's `read_file`/`write_file` rules for ai-memory-reflection are untouched. Verification probe: external command probe
 from agy (result recorded below when it returns).
 
 ---
@@ -273,7 +273,7 @@ eBPF program (after the user installed the toolchain). Out of scope: the Azure t
 Every control is guarded by a test; files restored and verified identical.
 
 ### Probe D.8 re-run
-`claude --version` from agy → `denied_actions: command`. The removal of the global `command(claude)` rule is verified.
+External command probe from agy → `denied_actions: command`. The removal of the global command rule is verified.
 
 ### Review of `irm/experiment.py` before running it outside the jail
 Loopback-only sockets; argument-list `subprocess` calls (no shell); every scope stopped and applied limits reverted in
@@ -281,7 +281,7 @@ Loopback-only sockets; argument-list `subprocess` calls (no shell); every scope 
 touched, and all limits disappear with the stopped scopes. Known biases, both against `irm`: cpuhog iterations/s in C
 include the 60 s unthrottled warm-up; in B the hog can end ~0.5 s before the load generator.
 
-### Security gate (independent Sonnet reviewer): **FAIL**, fixes dispatched (`.tasks/p10-security-fixes.md`)
+### Security gate (independent security reviewer): **FAIL**, fixes dispatched (`.tasks/p10-security-fixes.md`)
 | Severity (reviewer) | Finding | Architect assessment |
 |---|---|---|
 | Critical | `--allow "/"`, `".."`, `"../.."` defeat prefix confinement in `validate()` | Needs the operator to pass it, and user-owned writes still cannot touch root-owned cgroups, but it breaks the T9 invariant. Fix: entries must start with `/`, have no `..`, and resolve strictly inside root |

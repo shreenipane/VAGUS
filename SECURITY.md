@@ -17,7 +17,7 @@ decision), so the containment is an OS jail the agent cannot modify.
 
 | # | Threat | Control | Verified by |
 |---|---|---|---|
-| T1 | agy's file tools write outside the code directories (docs, `.tasks`, `pyproject.toml`, `.git`, `.claude`, other projects, `~`) | agy may write **anywhere inside its working directory** (BUILD_LOG D.6), so it is started from the empty `~/.local/share/irm/agy-ws`, never from the repo. The only repo `write_file` rules are `irm/`, `tests/`, `bpf/` (directory-matched: `irmx/` is refused). `read_file` covers the repository | Probes q6–q9 (R3) |
+| T1 | agy's file tools write outside the code directories (docs, `.tasks`, `pyproject.toml`, `.git`, other projects, `~`) | agy may write **anywhere inside its working directory** (BUILD_LOG D.6), so it is started from the empty `~/.local/share/irm/agy-ws`, never from the repo. The only repo `write_file` rules are `irm/`, `tests/`, `bpf/` (directory-matched: `irmx/` is refused). `read_file` covers the repository | Probes q6–q9 (R3) |
 | T2 | agy's commands read secrets, reach the network, or write outside the repository | The **only** command rule is `command(/home/shreenipane/.local/bin/irm-test)`; bare names, backticks, `$(…)`, `;`, newlines, and redirects are refused. agy **does** accept environment prefixes (`LD_PRELOAD=…`, `PATH=…`), so the launcher is a static, libc-free binary that reads no environment and execs `~/.local/lib/irm/irm-test.sh` with `PATH=/usr/bin` only. That script runs everything in bubblewrap: read-only `/`; tmpfs over `/home`, `/root`, `/tmp`, `/var/tmp`, `/run`, `/mnt`, `/media` (hides SSH keys, tokens, D-Bus, Wayland, X11); read-write binds only `irm/`, `tests/`, `bpf/` (plus `data/processed`, `models/`, `reports/` in `run` mode); `--unshare-all` (no network, no host PIDs); `--clearenv`; `--new-session`; `--die-with-parent`; `--cap-drop ALL`; absolute binary paths; `bash -p`. agy's own `--sandbox` is not used: it hides `~/.local/bin` | Probes p2–p7, q1–q5 (R1, R2); `.tasks/test_jail_probe.py` (18 checks); hostile-environment test (D.6) |
 | T3 | Jail-written files later run **outside** the jail without review: a poisoned virtualenv, git hooks, forged `__pycache__`, pickles | The virtualenv (`~/.local/share/irm/venv`) and git directory (`~/.local/share/irm/git`) live outside the repo; the jail sees the venv read-only. The `irm` wrapper sets `PYTHONPYCACHEPREFIX`, so jail-written bytecode is never loaded outside. Models load with `weights_only=True`, arrays with `allow_pickle=False`; nothing is pickled | Standing checks §3 |
 | T4 | Agent-written code runs outside the jail (`data fetch`, `monitor`, `apply`, `experiment`) | Only after the architect's diff review and the standing checks | Every step's gate |
@@ -53,6 +53,6 @@ git status --porcelain                                       # only files the sp
 
 ## 4. Open items
 
-- None. **Closed 2026-09-17:** the global agy rules `command(claude)` and `command(cp)`, which predated these projects
-  (`claude` could start an agent with the user's full permissions outside any jail, bypassing T2), were removed at the
+- None. **Closed 2026-09-17:** the legacy global agy rules for external commands and `command(cp)`, which predated these projects
+  (external commands could start an agent with the user's full permissions outside any jail, bypassing T2), were removed at the
   user's request. The only command rule is now the `irm-test` launcher (BUILD_LOG D.8).

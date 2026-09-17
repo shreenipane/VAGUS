@@ -59,7 +59,7 @@ passing tests).
 | Before Phase 2 | `sudo dnf install -y clang llvm bpftool libbpf-devel elfutils-libelf-devel zlib-devel` | BPF toolchain |
 | Phase 2 live | `sudo bpf/attrib \| irm monitor --attrib -` (in your own terminal) | Loading BPF needs root (`unprivileged_bpf_disabled = 2`) |
 | Phase 2 live | `sudo bpftool cgroup show /sys/fs/cgroup` | Confirms detachment |
-| Any time | Decide on removing agy's global `command(claude)` / `command(cp)` rules | SECURITY.md §4 |
+| Any time | Decide on removing agy's global external command / `command(cp)` rules | SECURITY.md §4 |
 
 ## 4. Scheduling notes
 
