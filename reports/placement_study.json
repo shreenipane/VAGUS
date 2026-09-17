@@ -15,95 +15,141 @@
     28,
     28,
     27,
-    28
+    27
   ],
+  "sizing": "training days only",
+  "ci_method": "t",
   "summary": {
     "FirstFit": {
       "energy_kwh": {
         "mean": 68.28427276611328,
-        "ci95": 1.2616150874018945
+        "ci95": 1.7868589197079894
       },
       "sla_overload_frac": {
         "mean": 0.15662533342838286,
-        "ci95": 0.003759307413275555
+        "ci95": 0.00532440682614946
       },
       "overloaded_host_step_frac": {
         "mean": 0.4567327460234839,
-        "ci95": 0.007692754884502642
+        "ci95": 0.010895452836418027
       },
       "migrations": {
         "mean": 2.2,
-        "ci95": 3.417376771735888
+        "ci95": 4.840121386907564
       },
       "mean_active_hosts": {
         "mean": 13.875694444444445,
-        "ci95": 0.21126180842151981
+        "ci95": 0.29921570417251986
       }
     },
     "BestFit": {
       "energy_kwh": {
         "mean": 68.24788665771484,
-        "ci95": 1.308787925289411
+        "ci95": 1.853671061532349
       },
       "sla_overload_frac": {
         "mean": 0.15725364685058593,
-        "ci95": 0.0030758054702404135
+        "ci95": 0.004356344890503769
       },
       "overloaded_host_step_frac": {
         "mean": 0.457739327762719,
-        "ci95": 0.007012394809340552
+        "ci95": 0.009931840811596619
       },
       "migrations": {
         "mean": 2.8,
-        "ci95": 3.582030708969425
+        "ci95": 5.073325126581185
       },
       "mean_active_hosts": {
         "mean": 13.865277777777777,
-        "ci95": 0.2315329616829511
+        "ci95": 0.3279262763427919
+      }
+    },
+    "ForecastFirstFit_0.8": {
+      "energy_kwh": {
+        "mean": 72.25150604248047,
+        "ci95": 2.563214062494284
+      },
+      "sla_overload_frac": {
+        "mean": 0.12340344041585923,
+        "ci95": 0.017621500591871477
+      },
+      "overloaded_host_step_frac": {
+        "mean": 0.33174998185953136,
+        "ci95": 0.043302702999630426
+      },
+      "migrations": {
+        "mean": 81.4,
+        "ci95": 16.224764163463206
+      },
+      "mean_active_hosts": {
+        "mean": 15.368055555555554,
+        "ci95": 0.6664927497683877
+      }
+    },
+    "ForecastBestFit_1.0": {
+      "energy_kwh": {
+        "mean": 70.36419067382812,
+        "ci95": 2.2400526082327965
+      },
+      "sla_overload_frac": {
+        "mean": 0.12652476578950883,
+        "ci95": 0.011871599580504235
+      },
+      "overloaded_host_step_frac": {
+        "mean": 0.3647639685044064,
+        "ci95": 0.025180328938473714
+      },
+      "migrations": {
+        "mean": 60.0,
+        "ci95": 10.999407402219447
+      },
+      "mean_active_hosts": {
+        "mean": 14.584722222222222,
+        "ci95": 0.4419154624549697
       }
     },
     "DQN": {
       "energy_kwh": {
-        "mean": 69.2076431274414,
-        "ci95": 1.375839611354556
+        "mean": 69.2570587158203,
+        "ci95": 1.981129964562225
       },
       "sla_overload_frac": {
-        "mean": 0.10599738657474518,
-        "ci95": 0.008196697595355747
+        "mean": 0.1020920068025589,
+        "ci95": 0.004086546918666057
       },
       "overloaded_host_step_frac": {
-        "mean": 0.3684007322014792,
-        "ci95": 0.03326245028741185
+        "mean": 0.35477974311629457,
+        "ci95": 0.02699924030719244
       },
       "migrations": {
-        "mean": 47.0,
-        "ci95": 11.512393321981317
+        "mean": 50.4,
+        "ci95": 8.169178915900911
       },
       "mean_active_hosts": {
-        "mean": 14.007638888888891,
-        "ci95": 0.24301075142602624
+        "mean": 14.019444444444446,
+        "ci95": 0.3533753911682777
       }
     },
     "DQN_noK": {
       "energy_kwh": {
-        "mean": 69.37765197753906,
-        "ci95": 1.5149013217603255
+        "mean": 69.33968048095703,
+        "ci95": 2.12938043518231
       },
       "sla_overload_frac": {
-        "mean": 0.10453365296125412,
-        "ci95": 0.008849379505905636
+        "mean": 0.10796778202056885,
+        "ci95": 0.015761446554699833
       },
       "overloaded_host_step_frac": {
-        "mean": 0.36964005786042653,
-        "ci95": 0.024358022813879963
+        "mean": 0.38062415438136066,
+        "ci95": 0.04218729359022761
       },
       "migrations": {
-        "mean": 50.4,
-        "ci95": 14.032833498620299
+        "mean": 47.2,
+        "ci95": 24.03124693893348
       },
       "mean_active_hosts": {
-        "mean": 14.059027777777777,
-        "ci95": 0.2863918155093482
+        "mean": 14.058333333333334,
+        "ci95": 0.40541125416051255
       }
     }
   },
@@ -128,6 +174,26 @@
         "mean_active_hosts": 14.0,
         "decisions": 320,
         "overload": 29251.8984375
+      },
+      "ForecastFirstFit_0.8": {
+        "energy_kwh": 73.66004943847656,
+        "sla_overload_frac": 0.139910489320755,
+        "overloaded_host_step_frac": 0.360560872468284,
+        "migrations": 76,
+        "rejected": 0,
+        "mean_active_hosts": 15.600694444444445,
+        "decisions": 396,
+        "overload": 26203.111328125
+      },
+      "ForecastBestFit_1.0": {
+        "energy_kwh": 72.39879608154297,
+        "sla_overload_frac": 0.11996158957481384,
+        "overloaded_host_step_frac": 0.35017381228273464,
+        "migrations": 68,
+        "rejected": 0,
+        "mean_active_hosts": 14.98263888888889,
+        "decisions": 388,
+        "overload": 22466.98046875
       },
       "DQN": {
         "energy_kwh": 70.7924575805664,
@@ -171,6 +237,26 @@
         "decisions": 326,
         "overload": 29225.02734375
       },
+      "ForecastFirstFit_0.8": {
+        "energy_kwh": 71.09683990478516,
+        "sla_overload_frac": 0.10669498145580292,
+        "overloaded_host_step_frac": 0.2915506035283194,
+        "migrations": 101,
+        "rejected": 0,
+        "mean_active_hosts": 14.958333333333334,
+        "decisions": 418,
+        "overload": 19246.251953125
+      },
+      "ForecastBestFit_1.0": {
+        "energy_kwh": 69.49311828613281,
+        "sla_overload_frac": 0.12666738033294678,
+        "overloaded_host_step_frac": 0.35767835550181376,
+        "migrations": 64,
+        "rejected": 0,
+        "mean_active_hosts": 14.35763888888889,
+        "decisions": 381,
+        "overload": 22848.98046875
+      },
       "DQN": {
         "energy_kwh": 68.93599700927734,
         "sla_overload_frac": 0.10619621723890305,
@@ -212,6 +298,26 @@
         "mean_active_hosts": 14.0,
         "decisions": 321,
         "overload": 28248.529296875
+      },
+      "ForecastFirstFit_0.8": {
+        "energy_kwh": 72.57769012451172,
+        "sla_overload_frac": 0.12882578372955322,
+        "overloaded_host_step_frac": 0.3623842853917363,
+        "migrations": 66,
+        "rejected": 0,
+        "mean_active_hosts": 15.378472222222221,
+        "decisions": 387,
+        "overload": 23626.9765625
+      },
+      "ForecastBestFit_1.0": {
+        "energy_kwh": 71.23841094970703,
+        "sla_overload_frac": 0.11488842219114304,
+        "overloaded_host_step_frac": 0.34361026123793836,
+        "migrations": 67,
+        "rejected": 0,
+        "mean_active_hosts": 14.753472222222221,
+        "decisions": 388,
+        "overload": 21070.833984375
       },
       "DQN": {
         "energy_kwh": 69.87235260009766,
@@ -255,6 +361,26 @@
         "decisions": 323,
         "overload": 26943.9453125
       },
+      "ForecastFirstFit_0.8": {
+        "energy_kwh": 69.36729431152344,
+        "sla_overload_frac": 0.13106930255889893,
+        "overloaded_host_step_frac": 0.3475910693301998,
+        "migrations": 78,
+        "rejected": 0,
+        "mean_active_hosts": 14.774305555555555,
+        "decisions": 396,
+        "overload": 22889.0546875
+      },
+      "ForecastBestFit_1.0": {
+        "energy_kwh": 67.71988677978516,
+        "sla_overload_frac": 0.13207146525382996,
+        "overloaded_host_step_frac": 0.38319369147363236,
+        "migrations": 49,
+        "rejected": 0,
+        "mean_active_hosts": 14.090277777777779,
+        "decisions": 367,
+        "overload": 23064.08984375
+      },
       "DQN": {
         "energy_kwh": 66.65798950195312,
         "sla_overload_frac": 0.10096298903226852,
@@ -297,27 +423,47 @@
         "decisions": 322,
         "overload": 29339.638671875
       },
-      "DQN": {
-        "energy_kwh": 69.7794189453125,
-        "sla_overload_frac": 0.12165473401546478,
-        "overloaded_host_step_frac": 0.42404129793510326,
-        "migrations": 25,
+      "ForecastFirstFit_0.8": {
+        "energy_kwh": 74.55565643310547,
+        "sla_overload_frac": 0.11051664501428604,
+        "overloaded_host_step_frac": 0.29666307857911733,
+        "migrations": 86,
         "rejected": 0,
-        "mean_active_hosts": 14.125,
-        "decisions": 347,
-        "overload": 22342.849609375
+        "mean_active_hosts": 16.12847222222222,
+        "decisions": 408,
+        "overload": 20297.263671875
       },
-      "DQN_noK": {
-        "energy_kwh": 69.9273681640625,
-        "sla_overload_frac": 0.10456773638725281,
-        "overloaded_host_step_frac": 0.36160275319567353,
+      "ForecastBestFit_1.0": {
+        "energy_kwh": 70.97074127197266,
+        "sla_overload_frac": 0.13903497159481049,
+        "overloaded_host_step_frac": 0.3891637220259128,
+        "migrations": 52,
+        "rejected": 0,
+        "mean_active_hosts": 14.739583333333334,
+        "decisions": 374,
+        "overload": 25534.86328125
+      },
+      "DQN": {
+        "energy_kwh": 70.02649688720703,
+        "sla_overload_frac": 0.10212783515453339,
+        "overloaded_host_step_frac": 0.35593635250917993,
         "migrations": 42,
         "rejected": 0,
-        "mean_active_hosts": 14.125,
+        "mean_active_hosts": 14.184027777777779,
         "decisions": 364,
-        "overload": 19204.666015625
+        "overload": 18756.626953125
+      },
+      "DQN_noK": {
+        "energy_kwh": 69.73751068115234,
+        "sla_overload_frac": 0.12173838168382645,
+        "overloaded_host_step_frac": 0.4165232358003442,
+        "migrations": 26,
+        "rejected": 0,
+        "mean_active_hosts": 14.121527777777779,
+        "decisions": 348,
+        "overload": 22358.21875
       }
     }
   ],
-  "total_seconds": 1390.8677521029967
+  "total_seconds": 2699.757389704013
 }
