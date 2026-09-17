@@ -213,3 +213,26 @@ walks the cgroup tree twice (`discover` + `cgroup_ids`); a dead loader shows up 
 3 × interval. The mutation checks run at the phase gate after 2b.
 
 **Accepted.**
+
+---
+
+## Prototype (faculty demo, 2026-09-17)
+
+The user asked for a working prototype within 30 minutes. Four specs (`.tasks/p1`–`p4`) were dispatched to agy in
+parallel, each on its own files; the full suite passed (66 tests, jailed); `irm-test run train forecast` and
+`irm-test run evaluate placement` produced `reports/forecast.json` and `reports/placement.json` on synthetic data.
+Live smoke: every dashboard endpoint 200, spoofed `Host` → 421; dry run wrote nothing; apply + revert restored exact
+values.
+
+### Bug found in the live demo (spec error, architect's)
+`irm apply --yes` with 6 + 14 busy loops throttled `noisy-demo` (9.8 → 5.2 cores, throttled ratio 1.0) as intended,
+but batch 2 also wrote **114 values across 75 leaf cgroups** in the user's session (GNOME and app scopes capped at
+0.1 core, `memory.high` near their observed maximum). Causes, both in TRD §11 as written:
+1. Every leaf with enough samples gets a recommendation, including idle desktop services.
+2. `avail = max(0.1 × n_others, ncpu − reserve)`: with 136 leaves the floor term (13.6 cores) exceeded
+   `ncpu − reserve` (9.0), so the squeeze used the wrong budget.
+
+Mitigation applied immediately: `irm revert` (batch 2 fully restored), then only the two demo scopes applied from a
+filtered file. Verified: `noisy-demo.scope` is the only cgroup under `user@1000.service` with a numeric `cpu.max`.
+DEMO.md and HOWTO.md now filter before `apply`. **To fix after the demo:** recommend only for cgroups above a demand
+threshold or named with `--only`, and drop the floor from `avail`.

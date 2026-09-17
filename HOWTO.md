@@ -43,6 +43,9 @@ irm apply --yes                                          # writes cpu.max / memo
 irm revert                                               # restores the previous values of the last batch
 ```
 
+- ⚠️ **Prototype bug:** `recommend` currently emits limits for every busy cgroup in your session, and the 0.1-core floor
+  per cgroup can over-squeeze the budget. Until it is fixed, filter `data/recommendations.json` to the cgroups you mean
+  (see DEMO.md §3) and pass the filtered file to `apply --from`. If you already applied everything: `irm revert`.
 - Cgroup paths look like `/user.slice/user-1000.slice/user@1000.service/app.slice/<name>.scope` (the dashboard shows
   the full path when you hover over a name).
 - `apply` only writes inside your own systemd user subtree (`user@<uid>.service`). Add others with `--allow`, at your

@@ -36,10 +36,12 @@ irm recommend --protect $C --min-samples 12 --hours 1
 Say: the planner takes each cgroup's P95 demand, **reserves** capacity for the protected job, and squeezes everyone else
 into what is left; the reason column explains each limit. The Plan card shows the same table.
 
-**Execute (dry run, then for real):**
+**Execute (dry run, then for real).** ⚠️ Prototype bug: `recommend` produces limits for **every** busy cgroup in your
+session (GNOME, Firefox, the terminal). Plain `irm apply --yes` would cap them all. On stage, apply only the demo scopes:
 ```sh
-irm apply            # prints old → new, writes nothing
-irm apply --yes      # journaled cgroup v2 writes: cpu.max, memory.high, cpu.weight
+python3 -c "import json; p='data/recommendations.json'; r=json.load(open(p)); r['items']=[i for i in r['items'] if i['cgroup'].endswith(('/noisy-demo.scope','/critical-demo.scope'))]; json.dump(r, open('data/recommendations-demo.json','w'), indent=2)"
+irm apply --from data/recommendations-demo.json          # prints old → new, writes nothing
+irm apply --from data/recommendations-demo.json --yes    # journaled cgroup v2 writes: cpu.max, memory.high, cpu.weight
 ```
 Watch the chart: `noisy-demo` drops to its quota and its throttled line rises; the critical job keeps its cores.
 Safety: writes are limited to your own delegated systemd subtree, validated, clamped, and journaled.
